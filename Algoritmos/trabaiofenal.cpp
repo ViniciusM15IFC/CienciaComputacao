@@ -5,7 +5,7 @@
 #include <locale.h>
 #include <time.h>
 #include <ctype.h>
-#define MAX 5
+#define MAX 20
 
 // Descarta qualquer caractere restante na linha atual
 void limparLinha()
@@ -24,6 +24,8 @@ void continuar()
 	getchar();
 }
 
+	//registros
+
 struct endereco
 {
     char estado[3];
@@ -38,7 +40,7 @@ struct paciente
 {
     int codigo;
     char nome[50];
-    char cpf[15];
+    char cpf[12];
     char dataNasc[11];
     char sexo;
     char telefone[15];
@@ -48,27 +50,35 @@ struct paciente
     bool ativo;
 };
 
+	//variáveis globais
+
 struct paciente pacs[MAX];
 int cod = 1;
 int i;
+
+	//protótipos
 
 void inicio();
 int opcaoMenu(int menu);
 void cadastrar();
 void listar();
-void buscar
-void consultarPorCod();
+void buscar();
+void buscarPorNome();
+void consultarPorInd(int index);
 void alterar();
 void excluir();
 struct endereco pedirEndereco();
+int calcularIdade(char dataNasc[]);
 void montarData(int d, int m, int a, char resultado[]);
 void formatarTelefone(char telefone[], char resultado[]);
+void formatarCPF(char cpf[], char resultado[]);
 bool validarCpf(char cpf[]);
 bool validarData(int d, int m, int a);
 bool validarTelefone(char telefone[]);
 bool validarTipoSang(char tipoSang[]);
 bool validarSexo(char sexo);
 int obterIndice();
+void preencher();
 
 int main()
 {
@@ -78,6 +88,8 @@ int main()
 
     return 0;
 }
+
+	//funções de menu
 
 int opcaoMenu(int menu)
 {
@@ -92,7 +104,7 @@ int opcaoMenu(int menu)
         printf("4 - Alterar\n");
         printf("5 - Excluir\n");
         printf("6 - Sair\n");
-        printf("Digite: ")
+        printf("Digite: ");
     }
     else if (menu == 1)
     {
@@ -106,7 +118,7 @@ int opcaoMenu(int menu)
         printf("7 - Tipo Sanguíneo\n");
         printf("8 - Convênio\n");
         printf("9 - Voltar\n");
-        printf("Digite: ")
+        printf("Digite: ");
     }
     else if (menu == 2)
     {
@@ -114,7 +126,7 @@ int opcaoMenu(int menu)
         printf("1 - Consulta por código\n");
         printf("2 - Busca por nome\n");
         printf("3 - Cancelar\n");
-        printf("Digite: ")
+        printf("Digite: ");
 	}
 
     if (scanf("%i", &op) != 1)
@@ -156,12 +168,22 @@ void inicio()
         case 6:
             printf("Encerrando o programa...\n");
             break;
+        case 101:
+        	printf("Função de Debug: Preenchendo...");
+        	preencher();
+			break;
+		case 102:
+			printf("Função de Debug: Excluindo tudo...");
+        	cod = 1;
+			break;
         default:
             printf("Opção Inválida!\n");
             break;
         }
     } while (opcao != 6);
 }
+
+	// funções básicas
 
 void cadastrar()
 {
@@ -184,8 +206,8 @@ void cadastrar()
 
     do
     {
-        printf("Digite o CPF do paciente: ");
-        scanf(" %14[^\n]s", pa.cpf);
+        printf("Digite o CPF do paciente(somente números): ");
+        scanf(" %11[^\n]s", pa.cpf);
         limparLinha();
     } while (!validarCpf(pa.cpf));
 
@@ -201,13 +223,13 @@ void cadastrar()
 	{
 		printf("Digite o sexo do paciente (M/F): ");
     	scanf(" %c", &pa.sexo);
-    	toupper(pa.sexo); 
+    	pa.sexo = toupper(pa.sexo); 
 	}while(!validarSexo(pa.sexo));
     
     
     do
     {
-        printf("Digite o telefone do paciente(apenas números): ");
+        printf("Digite o telefone do paciente(somente números): ");
         scanf(" %14[^\n]s", pa.telefone);
         limparLinha();
     } while (!validarTelefone(pa.telefone));
@@ -229,10 +251,13 @@ void cadastrar()
 
     char telefoneFormatado[15];
     formatarTelefone(pa.telefone, telefoneFormatado);
+    
+    char cpfFormatado[15];
+    formatarCPF(pa.cpf, cpfFormatado);
 
     printf("\n--- Dados do Paciente ---\n");
     printf("Nome: %s\n", pa.nome);
-    printf("CPF: %s\n", pa.cpf);
+    printf("CPF: %s\n", cpfFormatado);
     printf("Data de Nascimento: %s\n", pa.dataNasc);
     printf("Sexo: %c\n", pa.sexo);
     printf("Telefone: %s\n", telefoneFormatado);
@@ -287,25 +312,20 @@ struct endereco pedirEndereco()
     return e;
 }
 
-void montarData(int d, int m, int a, char resultado[])
-{
-    sprintf(resultado, "%02d/%02d/%04d", d, m, a);
-}
-
-void formatarTelefone(char telefone[], char resultado[])
-{
-    sprintf(resultado, "(%.2s) %.5s-%.4s", telefone, telefone + 2, telefone + 7);
-}
 
 void listar()
 {
-	int cont;
+	int cont = 0;
     for (i = 0; i < cod - 1; i++)
     {
-        if (!pacs[i].ativo)
-            continue; // Pula pacientes inativos
-        printf("%i - %s\n", pacs[i].codigo, pacs[i].nome);
-        cont++;
+        if (pacs[i].ativo)
+        {
+        	char cpfFormatado[15];
+			formatarCPF(pacs[i].cpf, cpfFormatado);
+            
+        	printf("%i - %s - %s - %i Anos\n", pacs[i].codigo, pacs[i].nome, cpfFormatado, calcularIdade(pacs[i].dataNasc));
+        	cont++;
+		}	
     }
 
     if (cod == 1)
@@ -321,69 +341,35 @@ void listar()
 	continuar();
 }
 
-int obterIndice()
-{
-    int codigo;
-    int index;
 
-    if (cod == 1)
-    {
-        printf("Nenhum paciente cadastrado.\n");
-        return -1;
-    }
-    else
-    {
-        printf("Digite o código do paciente: ");
-        scanf("%d", &codigo);
-        index = codigo - 1;
-
-        if (index < 0 || index >= cod - 1)
-        {
-            printf("Código inválido!\n");
-            return -1;
-        }
-    }
-
-    if (pacs[index].ativo == false)
-    {
-        printf("Paciente não encontrado ou inativo.\n");
-        return -1;
-    }
-    else
-    {
-        return index;
-    }
-}
 
 void buscar()
 {
 	int op = opcaoMenu(2);
-	do
+	int index;
+	
+	switch(op)
 	{
-		switch()
-		{
-			case 1:
-				consultarPorCod();
-				break;
-			case 2:
-				buscarPorNome();
-			    break;
-			case 3:
-				printf("Voltando...")
-				continuar();
-				break;
-			default:
-				printf("Opção inválida")
-		}	
-	}while(op != 3);
+		case 1:
+			index = obterIndice();
+			consultarPorInd(index);
+			break;
+		case 2:
+			buscarPorNome();
+		    break;
+		case 3:
+			printf("Voltando pro menu inicial...");
+			continuar();
+			break;
+		default:
+			printf("Opção inválida");
+			break;
+	}	
 	
 }
 
-void consultarPorCod()
+void consultarPorInd(int index)
 {
-    int index;
-
-    index = obterIndice();
     if (index == -1)
     {
         return;
@@ -406,7 +392,44 @@ void consultarPorCod()
 
 void buscarPorNome()
 {
-	printf("Em desenvolvimento")
+	char busca[50];
+	int codigo;
+	int cont = 0;
+	
+	printf("Digite um nome para buscar: ");
+	scanf(" %49[^\n]s", &busca);
+	
+	strupr(busca);
+	
+	for (i=0; i<cod-1; i++)
+	{
+		if (pacs[i].ativo)
+    	{
+			if (strstr(pacs[i].nome, busca) != NULL) 
+			{
+    			printf("%i - %s - %s - %i Anos\n", pacs[i].codigo, pacs[i].nome, pacs[i].cpf, calcularIdade(pacs[i].dataNasc));
+        		cont ++;
+			}
+		}
+	}
+	
+	if(cont == 0)
+	{
+		printf("Nenhum paciente encontrado\n");
+		continuar();
+		return;
+	}
+	
+	printf("Digite o código para consultar(0 para voltar): ");
+	scanf("%i", &codigo);
+	
+	if(codigo == 0)
+	{
+		printf("Voltando pro menu inicial...");
+		return;
+	}
+	
+	consultarPorInd(codigo - 1);
 }
 void alterar() 
 { 
@@ -428,14 +451,15 @@ void alterar()
 	    case 1:
 	        printf("Digite o novo nome: ");
 	        scanf(" %49[^\n]s", pacs[index].nome);
+	        strupr(pacs[index].nome);
 	        limparLinha();
 	        printf("Nome atualizado com sucesso!\n");
 	        break;
 	    case 2:
 	        do
 	        {
-	            printf("Digite o novo CPF: ");
-	            scanf(" %14[^\n]s", pacs[index].cpf);
+	            printf("Digite o novo CPF(somente números): ");
+	            scanf(" %11[^\n]s", pacs[index].cpf);
 	            limparLinha();
 	        } while (!validarCpf(pacs[index].cpf));
 	        printf("CPF atualizado com sucesso!\n");
@@ -455,7 +479,7 @@ void alterar()
 	    	{
 	    		printf("Digite o novo sexo (M/F): ");
 	        	scanf(" %c", &pacs[index].sexo);
-	        	toupper(pacs[index].sexo);	
+	        	pacs[index].sexo = toupper(pacs[index].sexo);	
 			}while(!validarSexo(pacs[index].sexo));
 	        
 	        printf("Sexo atualizado com sucesso!\n");
@@ -490,8 +514,7 @@ void alterar()
 	        printf("Convênio atualizado com sucesso!\n");
 	        break;
 	    case 9:
-	        printf("Voltando...\n");
-	        continuar();
+	        printf("Voltando pro menu inicial...\n");
 	        break;
 	    default:
 	        printf("Opção Inválida!\n");
@@ -528,13 +551,97 @@ void excluir()
     }
 }
 
+// funções auxiliares
+
+int obterIndice()
+{
+    int codigo;
+    int index;
+
+    if (cod == 1)
+    {
+        printf("Nenhum paciente cadastrado.\n");
+        return -1;
+    }
+    else
+    {
+        printf("Digite o código do paciente: ");
+        scanf("%d", &codigo);
+        index = codigo - 1;
+
+        if (index < 0 || index >= cod - 1)
+        {
+            printf("Código inválido!\n");
+            continuar();
+            return -1;
+        }
+    }
+
+    if (pacs[index].ativo == false)
+    {
+        printf("Paciente não encontrado ou inativo.\n");
+        return -1;
+    }
+    else
+    {
+        return index;
+    }
+}
+
+int calcularIdade(char dataNasc[])
+{
+    int diaNasc, mesNasc, anoNasc;
+    
+    sscanf(dataNasc, "%d/%d/%d", &diaNasc, &mesNasc, &anoNasc);
+
+    //data atual do sistema
+    time_t t = time(NULL);
+    struct tm tmAtual = *localtime(&t);
+
+    int anoAtual = tmAtual.tm_year + 1900; // tm_year conta os anos desde 1900
+    int mesAtual = tmAtual.tm_mon + 1;     // tm_mon vai de 0 a 11
+    int diaAtual = tmAtual.tm_mday;
+
+    int idade = anoAtual - anoNasc;
+
+    // Se a pessoa ainda não fez aniversário no ano atual, subtrai 1 ano
+    if (mesAtual < mesNasc || (mesAtual == mesNasc && diaAtual < diaNasc))
+    {
+        idade--;
+    }
+
+    return idade;
+}
+
+
+// funções de formatação
+
+void montarData(int d, int m, int a, char resultado[])
+{
+    sprintf(resultado, "%02d/%02d/%04d", d, m, a);
+}
+
+void formatarTelefone(char telefone[], char resultado[])
+{
+    sprintf(resultado, "(%.2s) %.5s-%.4s", telefone, telefone + 2, telefone + 7);
+}
+void formatarCPF(char cpf[], char resultado[])
+{
+	sprintf(resultado, "%.3s.%.3s.%.3s-%.2s", cpf, cpf + 3, cpf + 6, cpf + 9);
+}
+
+	// funções de validação
+
 bool validarCpf(char cpf[])
 {
-    if (strlen(cpf) != 14)
+	
+    if (strlen(cpf) != 11)
     {
         printf("[ERRO] CPF inválido!\n");
         return false;
     }
+    
+    
     return true;
 }
 
@@ -560,7 +667,7 @@ bool validarTelefone(char telefone[])
 
 bool validarTipoSang(char tipoSang[])
 {
-    const char *tiposValidos[] = {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"};
+    const char tiposValidos[8][4] = {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"};
     for (int i = 0; i < 8; i++)
     {
         if (strcmp(tipoSang, tiposValidos[i]) == 0)
@@ -570,7 +677,7 @@ bool validarTipoSang(char tipoSang[])
     }
     printf("[ERRO] Tipo sanguíneo inválido!\n");
     return false;
-}
+} 
 
 bool validarSexo(char sexo)
 {
@@ -582,4 +689,76 @@ bool validarSexo(char sexo)
 	{
 		printf("[ERRO] Sexo inválido!\n");
 	}
+}
+
+// funções de debug
+
+void preencher()
+{
+    const char nomes[20][20] = {
+        "JOAO SILVA", "MARIA OLIVEIRA", "PEDRO SOUZA", "ANA COSTA",
+        "CARLOS PEREIRA", "JULIANA RODRIGUES", "LUCAS ALMEIDA", "FERNANDA LIMA",
+        "RAFAEL GOMES", "BEATRIZ MARTINS", "BRUNO CARVALHO", "LARISSA FERREIRA",
+        "GUSTAVO RIBEIRO", "CAMILA BARBOSA", "DIEGO ROCHA", "PATRICIA DIAS",
+        "THIAGO NUNES", "AMANDA CASTRO", "FELIPE TEIXEIRA", "LETICIA MOREIRA"
+    };
+    const char cidades[5][20] = { "VIDEIRA", "JOACABA", "CACADOR", "TANGARA", "FLORIANOPOLIS" };
+    const char bairros[4][20] = { "CENTRO", "SAO CRISTOVAO", "VILA NOVA", "JARDIM AMERICA" };
+    const char ruas[4][25] = { "RUA DAS FLORES", "AVENIDA BRASIL", "RUA SETE DE SETEMBRO", "RUA XV DE NOVEMBRO" };
+    const char tipos[8][4] = { "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-" };
+    const char convenios[5][20] = { "UNIMED", "SUS", "BRADESCO SAUDE", "AMIL", "PARTICULAR" };
+
+    int qtd = 20;
+    int k;
+
+    if (cod + qtd - 1 > MAX)
+    {
+        qtd = MAX - cod + 1;
+    }
+
+    if (qtd <= 0)
+    {
+        printf("[ERRO] Limite maximo de %d pacientes ja atingido!\n", MAX);
+        continuar();
+        return;
+    }
+
+    for (k = 0; k < qtd; k++)
+    {
+        struct paciente pa;
+        int idx = k % 20;
+
+        pa.codigo = cod;
+        pa.ativo = true;
+
+        strcpy(pa.nome, nomes[idx]);
+
+        {
+            unsigned int parte1 = (unsigned int) cod % 1000;
+            unsigned int parte2 = ((unsigned int) cod * 137u) % 90000000u + 10000000u;
+            sprintf(pa.cpf, "%03u%08u", parte1, parte2);
+        }
+
+        montarData(1 + (cod % 28), 1 + (cod % 12), 1950 + (cod % 70), pa.dataNasc);
+
+        pa.sexo = (cod % 2 == 0) ? 'F' : 'M';
+
+        sprintf(pa.telefone, "47%09d", 900000000 + cod * 11);
+
+        strcpy(pa.ender.estado, "SC");
+        strcpy(pa.ender.cidade, cidades[cod % 5]);
+        strcpy(pa.ender.bairro, bairros[cod % 4]);
+        strcpy(pa.ender.rua, ruas[cod % 4]);
+        pa.ender.numero = 100 + cod;
+        strcpy(pa.ender.complemento, "S/N");
+
+        strcpy(pa.tipoSang, tipos[cod % 8]);
+        strcpy(pa.convenio, convenios[cod % 5]);
+
+        pacs[cod - 1] = pa;
+        cod++;
+    }
+
+    printf("%d pacientes de teste gerados com sucesso!\n", qtd);
+    continuar();
 }
