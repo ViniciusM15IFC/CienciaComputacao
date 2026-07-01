@@ -282,37 +282,6 @@ void cadastrar()
     }
 }
 
-struct endereco pedirEndereco()
-{
-    struct endereco e;
-    printf("Digite o estado (UF): ");
-    scanf(" %2[^\n]s", e.estado);
-    strupr(e.estado);
-    limparLinha();
-
-    printf("Digite a cidade: ");
-    scanf(" %29[^\n]s", e.cidade);
-    limparLinha();
-
-    printf("Digite o bairro: ");
-    scanf(" %29[^\n]s", e.bairro);
-    limparLinha();
-
-    printf("Digite a rua: ");
-    scanf(" %49[^\n]s", e.rua);
-    limparLinha();
-
-    printf("Digite o número: ");
-    scanf("%d", &e.numero);
-
-    printf("Digite o complemento: ");
-    scanf(" %29[^\n]s", e.complemento);
-    limparLinha();
-
-    return e;
-}
-
-
 void listar()
 {
 	int cont = 0;
@@ -368,69 +337,6 @@ void buscar()
 	
 }
 
-void consultarPorInd(int index)
-{
-    if (index == -1)
-    {
-        return;
-    }
-
-    printf("\n--- Paciente %d ---\n", pacs[index].codigo);
-    printf("Nome: %s\n", pacs[index].nome);
-    printf("CPF: %s\n", pacs[index].cpf);
-    printf("Data de Nascimento: %s\n", pacs[index].dataNasc);
-    printf("Sexo: %c\n", pacs[index].sexo);
-    char telefoneFormatado[15];
-    formatarTelefone(pacs[index].telefone, telefoneFormatado);
-    printf("Telefone: %s\n", telefoneFormatado);
-    printf("Endereço: %s, %s, %s, %s, %d\n", pacs[index].ender.rua, pacs[index].ender.bairro, pacs[index].ender.cidade, pacs[index].ender.estado, pacs[index].ender.numero);
-    printf("Tipo Sanguíneo: %s\n", pacs[index].tipoSang);
-    printf("Convênio: %s\n", pacs[index].convenio);
-    
-    continuar();
-}
-
-void buscarPorNome()
-{
-	char busca[50];
-	int codigo;
-	int cont = 0;
-	
-	printf("Digite um nome para buscar: ");
-	scanf(" %49[^\n]s", &busca);
-	
-	strupr(busca);
-	
-	for (i=0; i<cod-1; i++)
-	{
-		if (pacs[i].ativo)
-    	{
-			if (strstr(pacs[i].nome, busca) != NULL) 
-			{
-    			printf("%i - %s - %s - %i Anos\n", pacs[i].codigo, pacs[i].nome, pacs[i].cpf, calcularIdade(pacs[i].dataNasc));
-        		cont ++;
-			}
-		}
-	}
-	
-	if(cont == 0)
-	{
-		printf("Nenhum paciente encontrado\n");
-		continuar();
-		return;
-	}
-	
-	printf("Digite o código para consultar(0 para voltar): ");
-	scanf("%i", &codigo);
-	
-	if(codigo == 0)
-	{
-		printf("Voltando pro menu inicial...");
-		return;
-	}
-	
-	consultarPorInd(codigo - 1);
-}
 void alterar() 
 { 
     int index;
@@ -553,6 +459,103 @@ void excluir()
 
 // funções auxiliares
 
+void consultarPorInd(int index)
+{
+    if (index == -1)
+    {
+        return;
+    }
+
+    printf("\n--- Paciente %d ---\n", pacs[index].codigo);
+    printf("Nome: %s\n", pacs[index].nome);
+    char cpfFormatado[15];
+    formatarCPF(pacs[index].cpf, cpfFormatado);
+    printf("CPF: %s\n", cpfFormatado);
+    printf("Data de Nascimento: %s\n", pacs[index].dataNasc);
+    printf("Sexo: %c\n", pacs[index].sexo);
+    char telefoneFormatado[15];
+    formatarTelefone(pacs[index].telefone, telefoneFormatado);
+    printf("Telefone: %s\n", telefoneFormatado);
+    printf("Endereço: %s, %s, %s, %s, %d\n", pacs[index].ender.rua, pacs[index].ender.bairro, pacs[index].ender.cidade, pacs[index].ender.estado, pacs[index].ender.numero);
+    printf("Tipo Sanguíneo: %s\n", pacs[index].tipoSang);
+    printf("Convênio: %s\n", pacs[index].convenio);
+    
+    continuar();
+}
+
+struct endereco pedirEndereco()
+{
+    struct endereco e;
+    printf("Digite o estado (UF): ");
+    scanf(" %2[^\n]s", e.estado);
+    strupr(e.estado);
+    limparLinha();
+
+    printf("Digite a cidade: ");
+    scanf(" %29[^\n]s", e.cidade);
+    limparLinha();
+
+    printf("Digite o bairro: ");
+    scanf(" %29[^\n]s", e.bairro);
+    limparLinha();
+
+    printf("Digite a rua: ");
+    scanf(" %49[^\n]s", e.rua);
+    limparLinha();
+
+    printf("Digite o número: ");
+    scanf("%d", &e.numero);
+
+    printf("Digite o complemento: ");
+    scanf(" %29[^\n]s", e.complemento);
+    limparLinha();
+
+    return e;
+}
+
+
+void buscarPorNome()
+{
+	char busca[50];
+	int codigo;
+	int cont = 0;
+	
+	printf("Digite um nome para buscar: ");
+	scanf(" %49[^\n]s", &busca);
+	
+	strupr(busca);
+	
+	for (i=0; i<cod-1; i++)
+	{
+		if (pacs[i].ativo)
+    	{
+			if (strstr(pacs[i].nome, busca) != NULL) 
+			{
+    			printf("%i - %s - %s - %i Anos\n", pacs[i].codigo, pacs[i].nome, pacs[i].cpf, calcularIdade(pacs[i].dataNasc));
+        		cont ++;
+			}
+		}
+	}
+	
+	if(cont == 0)
+	{
+		printf("Nenhum paciente encontrado\n");
+		continuar();
+		return;
+	}
+	
+	printf("Digite o código para consultar(0 para voltar): ");
+	scanf("%i", &codigo);
+	
+	if(codigo == 0)
+	{
+		printf("Voltando pro menu inicial...");
+		return;
+	}
+	
+	consultarPorInd(codigo - 1);
+}
+
 int obterIndice()
 {
     int codigo;
@@ -614,7 +617,7 @@ int calcularIdade(char dataNasc[])
 }
 
 
-// funções de formatação
+    // funções de formatação
 
 void montarData(int d, int m, int a, char resultado[])
 {
@@ -688,6 +691,7 @@ bool validarSexo(char sexo)
 	else
 	{
 		printf("[ERRO] Sexo inválido!\n");
+        return false;
 	}
 }
 
