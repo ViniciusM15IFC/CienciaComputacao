@@ -141,14 +141,14 @@ int opcaoMenu(int menu)
 
 void inicio()
 {
-    int opcao;
+    int op;
 
     do
     {
     	system("cls");
-        opcao = opcaoMenu(0);
+        op = opcaoMenu(0);
 
-        switch (opcao)
+        switch (op)
         {
         case 1:
             cadastrar();
@@ -180,7 +180,7 @@ void inicio()
             printf("Opção Inválida!\n");
             break;
         }
-    } while (opcao != 6);
+    } while (op != 6);
 }
 
 	// funções básicas
