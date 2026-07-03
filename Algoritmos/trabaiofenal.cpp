@@ -191,7 +191,7 @@ void cadastrar()
 {
     if (cod > MAX)
     {
-        printf("[ERRO] Limite máximo de %d pacientes atingido!\n", MAX);
+        printf("[ERRO] Limite máximo de %i pacientes atingido!\n", MAX);
         continuar();
         return;
     }
@@ -200,16 +200,20 @@ void cadastrar()
     pa.codigo = cod;
     pa.ativo = true;
     char conf;
-
-    printf("Digite o nome do paciente: ");
-    scanf(" %49[^\n]s", pa.nome);
+    
+    do
+    {
+    	printf("Digite o nome do paciente: ");
+    	scanf(" %49[^\n]s", pa.nome);
+	}while(strlen(pa.nome) < 3);
+	
     strupr(pa.nome);
     limparLinha();
 
     do
     {
         printf("Digite o CPF do paciente(somente números): ");
-        scanf(" %11[^\n]s", pa.cpf);
+        scanf(" %[^\n]s", pa.cpf);
         limparLinha();
     } while (!validarCpf(pa.cpf));
 
@@ -232,7 +236,7 @@ void cadastrar()
     do
     {
         printf("Digite o telefone do paciente(somente números): ");
-        scanf(" %14[^\n]s", pa.telefone);
+        scanf(" %[^\n]s", pa.telefone);
         limparLinha();
     } while (!validarTelefone(pa.telefone));
 
@@ -263,7 +267,7 @@ void cadastrar()
     printf("Data de Nascimento: %s\n", pa.dataNasc);
     printf("Sexo: %c\n", pa.sexo);
     printf("Telefone: %s\n", telefoneFormatado);
-    printf("Endereço: %s, %s, %s, %s, %d\n", pa.ender.rua, pa.ender.bairro, pa.ender.cidade, pa.ender.estado, pa.ender.numero);
+    printf("Endereço: %s, %s, %s, %s, %i\n", pa.ender.rua, pa.ender.bairro, pa.ender.cidade, pa.ender.estado, pa.ender.numero);
     printf("Tipo Sanguíneo: %s\n", pa.tipoSang);
     printf("Convênio: %s\n", pa.convenio);
 
@@ -360,8 +364,12 @@ void alterar()
 	    switch (op)
 	    {
 	    case 1:
-	        printf("Digite o novo nome: ");
-	        scanf(" %49[^\n]s", pacs[index].nome);
+	    	do
+	    	{
+	    		printf("Digite o novo nome: ");
+	        	scanf(" %49[^\n]s", pacs[index].nome);	
+			}while(strlen(pacs[index].nome) < 3);
+	      
 	        strupr(pacs[index].nome);
 	        limparLinha();
 	        printf("Nome atualizado com sucesso!\n");
@@ -380,7 +388,7 @@ void alterar()
 	        do
 	        {
 	            printf("Digite a nova data de nascimento (dd/mm/aaaa): ");
-	            scanf("%d/%d/%d", &dia, &mes, &ano);
+	            scanf("%i/%i/%i", &dia, &mes, &ano);
 	        } while (!validarData(dia, mes, ano));
 	        montarData(dia, mes, ano, pacs[index].dataNasc);
 	        printf("Data de nascimento atualizada com sucesso!\n");
@@ -471,7 +479,7 @@ void consultarPorInd(int index)
         return;
     }
 
-    printf("\n--- Paciente %d ---\n", pacs[index].codigo);
+    printf("\n--- Paciente %i ---\n", pacs[index].codigo);
     printf("Nome: %s\n", pacs[index].nome);
     char cpfFormatado[15];
     formatarCPF(pacs[index].cpf, cpfFormatado);
@@ -481,7 +489,7 @@ void consultarPorInd(int index)
     char telefoneFormatado[15];
     formatarTelefone(pacs[index].telefone, telefoneFormatado);
     printf("Telefone: %s\n", telefoneFormatado);
-    printf("Endereço: %s, %s, %s, %s, %d\n", pacs[index].ender.rua, pacs[index].ender.bairro, pacs[index].ender.cidade, pacs[index].ender.estado, pacs[index].ender.numero);
+    printf("Endereço: %s, %s, %s, %s, %i\n", pacs[index].ender.rua, pacs[index].ender.bairro, pacs[index].ender.cidade, pacs[index].ender.estado, pacs[index].ender.numero);
     printf("Tipo Sanguíneo: %s\n", pacs[index].tipoSang);
     printf("Convênio: %s\n", pacs[index].convenio);
     
@@ -491,25 +499,39 @@ void consultarPorInd(int index)
 struct endereco pedirEndereco()
 {
     struct endereco e;
-    printf("Digite o estado (UF): ");
-    scanf(" %2[^\n]s", e.estado);
+    
+    do
+    {
+        printf("Digite o estado (UF): ");
+        scanf(" %2[^\n]s", e.estado);
+        limparLinha();
+    } while (strlen(e.estado) != 2);
     strupr(e.estado);
-    limparLinha();
 
-    printf("Digite a cidade: ");
-    scanf(" %29[^\n]s", e.cidade);
-    limparLinha();
+    do
+    {
+        printf("Digite a cidade: ");
+        scanf(" %29[^\n]s", e.cidade);
+        limparLinha();
+    } while (strlen(e.cidade) < 3);
 
-    printf("Digite o bairro: ");
-    scanf(" %29[^\n]s", e.bairro);
-    limparLinha();
+    do
+    {
+        printf("Digite o bairro: ");
+        scanf(" %29[^\n]s", e.bairro);
+        limparLinha();
+    } while (strlen(e.bairro) < 3);
 
-    printf("Digite a rua: ");
-    scanf(" %49[^\n]s", e.rua);
-    limparLinha();
+    do
+    {
+        printf("Digite a rua: ");
+        scanf(" %49[^\n]s", e.rua);
+        limparLinha();
+    } while (strlen(e.rua) < 3);
 
     printf("Digite o número: ");
-    scanf("%d", &e.numero);
+    scanf("%i", &e.numero);
+    limparLinha();
 
     printf("Digite o complemento: ");
     scanf(" %29[^\n]s", e.complemento);
@@ -602,7 +624,7 @@ int obterIndice()
     else
     {
         printf("Digite o código do paciente: ");
-        scanf("%d", &codigo);
+        scanf("%i", &codigo);
         index = codigo - 1;
 
         if (index < 0 || index >= cod - 1)
@@ -628,7 +650,7 @@ int calcularIdade(char dataNasc[])
 {
     int diaNasc, mesNasc, anoNasc;
     
-    sscanf(dataNasc, "%d/%d/%d", &diaNasc, &mesNasc, &anoNasc);
+    sscanf(dataNasc, "%i/%i/%i", &diaNasc, &mesNasc, &anoNasc);
 
     //data atual do sistema
     time_t t = time(NULL);
@@ -755,7 +777,7 @@ void preencher()
 
     if (qtd <= 0)
     {
-        printf("[ERRO] Limite maximo de %d pacientes ja atingido!\n", MAX);
+        printf("[ERRO] Limite maximo de %i pacientes ja atingido!\n", MAX);
         continuar();
         return;
     }
@@ -796,6 +818,6 @@ void preencher()
         cod++;
     }
 
-    printf("%d pacientes de teste gerados com sucesso!\n", qtd);
+    printf("%i pacientes de teste gerados com sucesso!\n", qtd);
     continuar();
 }
