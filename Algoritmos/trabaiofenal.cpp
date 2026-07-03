@@ -64,6 +64,7 @@ void cadastrar();
 void listar();
 void buscar();
 void buscarPorNome();
+void buscarPorCPF();
 void consultarPorInd(int index);
 void alterar();
 void excluir();
@@ -125,7 +126,8 @@ int opcaoMenu(int menu)
     	printf("\n= Escolha um modo de busca =\n");
         printf("1 - Consulta por código\n");
         printf("2 - Busca por nome\n");
-        printf("3 - Cancelar\n");
+        printf("3 - Busca por CPF\n");
+        printf("4 - Cancelar\n");
         printf("Digite: ");
 	}
 
@@ -327,6 +329,9 @@ void buscar()
 			buscarPorNome();
 		    break;
 		case 3:
+			buscarPorCPF();
+		    break;
+		case 4:
 			printf("Voltando pro menu inicial...");
 			continuar();
 			break;
@@ -554,6 +559,34 @@ void buscarPorNome()
 	}
 	
 	consultarPorInd(codigo - 1);
+}
+
+void buscarPorCPF()
+{
+    char busca[12];
+
+    printf("Digite o CPF para buscar (somente números): ");
+    scanf(" %11[^\n]", busca);
+    limparLinha();
+
+    if (!validarCpf(busca))
+    {
+        printf("[ERRO] CPF inválido!\n");
+        continuar();
+        return;
+    }
+
+    for (i = 0; i < cod - 1; i++)
+    {
+        if (pacs[i].ativo && strcmp(pacs[i].cpf, busca) == 0)
+        {
+            consultarPorInd(i);
+            return;
+        }
+    }
+
+    printf("Nenhum paciente encontrado com esse CPF.\n");
+    continuar();
 }
 
 int obterIndice()
