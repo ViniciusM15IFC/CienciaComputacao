@@ -217,7 +217,7 @@ void cadastrar()
     do
     {
         printf("Digite a data de nascimento (dd/mm/aaaa): ");
-        scanf("%d/%d/%d", &dia, &mes, &ano);
+        scanf("%i/%i/%i", &dia, &mes, &ano);
     } while (!validarData(dia, mes, ano));
 
     montarData(dia, mes, ano, pa.dataNasc);
