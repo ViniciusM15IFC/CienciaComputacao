@@ -24,8 +24,68 @@ Acima de R$ 500,00 | 15%
 
 package Lista1;
 
+import java.util.Scanner;
+
 public class Ex04 {
     public static void main(String[] args) {
+        Scanner s = new Scanner(System.in);
+
+        double precoUnit;
+        double precoBruto;
+        double desc;
+        double precoFinal;
+        int cod;
+
+        do
+        {
+            System.out.println("Digite o código");
+            cod = s.nextInt();
+        } while(cod < 1 && cod > 40);
+
+        System.out.println("Digite a quantidade comprada");
+        int quant = s.nextInt();
+
+        if (cod <= 10)
+        {
+            precoUnit = 10f;
+        }
+        else if (cod <= 20)
+        {
+            precoUnit = 15f;
+        }
+        else if (cod <= 30)
+        {
+            precoUnit = 20f;
+        }
+        else
+        {
+            precoUnit = 40f;
+        }
+
+        precoBruto = quant * precoUnit;
+
+        if (precoBruto <= 250)
+        {
+            desc = precoBruto * 0.05;
+        }
+        else if (precoBruto <= 500)
+        {
+            desc = precoBruto * 0.10;
+        }
+        else
+        {
+            desc = precoBruto * 0.15;
+        }
+
+        precoFinal = precoBruto - desc;
+
+        //System.out.printf("Código: %i\nQuantidade: %i\nPreço Bruto: %d\nDesconto: %d\n Preço Final: %d", cod, quant, precoBruto, desc, precoFinal);
+        System.out.println("Código: "+cod);
+        System.out.println("Quantidade: "+quant);
+        System.out.println("Preço Unitário: "+precoUnit);
+        System.out.println("Preço Bruto: "+precoBruto);
+        System.out.println("Desconto: "+desc);
+        System.out.println("Preço Final: "+precoFinal);
         
     }
 }
