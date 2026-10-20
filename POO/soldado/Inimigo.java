@@ -22,15 +22,11 @@ public class Inimigo {
     }
 
     public Soldado soldadoProximo() {
-        // Inicializa como null para evitar erro de compilação
         Soldado maisProximo = null;
-        // Usa o maior valor possível do Java em vez de 9999
         int menorDistancia = Integer.MAX_VALUE;
 
         for (Soldado soldado : Soldado.getTodasAsInstancias()) {
-            // Ignora a si mesmo se o objeto chamador também for um Soldado
-            if (soldado == this)
-                continue;
+            // REMOVIDO: o "if (soldado == this)" que causava o erro
 
             int dist = soldado.calcularDistancia(this.x, soldado.getX());
 
@@ -40,10 +36,12 @@ public class Inimigo {
             }
         }
 
-        return maisProximo; // Pode retornar null se não houver nenhum outro soldado
+        return maisProximo;
     }
 
-    public void atacar() {
+    public void atacar(int dano) {
+        Soldado soldado = soldadoProximo();
 
+        soldado.vida -= 20;
     }
 }

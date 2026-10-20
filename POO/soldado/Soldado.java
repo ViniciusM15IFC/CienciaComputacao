@@ -7,6 +7,7 @@ class Soldado {
     private int x = 0;
     private static int totalSoldados = 0;
     private static final List<Soldado> todasAsInstancias = new ArrayList<>();
+    private int vida = 20;
 
     public Soldado() {
         totalSoldados++;
@@ -29,6 +30,16 @@ class Soldado {
     public int getX()
     {
         return this.x;
+    }
+
+    public void sofreDano(int dano)
+    {
+        this.vida -= dano;
+    }
+
+    public int getVida()
+    {
+        return this.vida;
     }
 
     public int calcularDistancia(int n1, int n2) {
