@@ -26,8 +26,6 @@ public class Inimigo {
         int menorDistancia = Integer.MAX_VALUE;
 
         for (Soldado soldado : Soldado.getTodasAsInstancias()) {
-            // REMOVIDO: o "if (soldado == this)" que causava o erro
-
             int dist = soldado.calcularDistancia(this.x, soldado.getX());
 
             if (dist < menorDistancia) {
@@ -39,9 +37,12 @@ public class Inimigo {
         return maisProximo;
     }
 
-    public void atacar(int dano) {
+    public Soldado atacar(int dano) {
         Soldado soldado = soldadoProximo();
 
-        soldado.vida -= 20;
+        if (soldado != null) {
+            soldado.sofrerDano(dano);
+        }
+        return soldado;
     }
 }
