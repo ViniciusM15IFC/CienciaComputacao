@@ -23,7 +23,7 @@ public class Agenda {
 
         for (Contato contato : contatos) {
             msg += contato + "\n\n";                                                             
-        }
+        }     
 
         return msg;
     }
