@@ -1,4 +1,5 @@
-package Agenda;
+package POO.Agenda;
+
 
 public class Email {
     private String email;

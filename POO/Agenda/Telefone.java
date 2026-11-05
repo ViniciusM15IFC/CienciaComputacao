@@ -1,4 +1,4 @@
-package Agenda;
+package POO.Agenda;
 
 public class Telefone {
     private String telefone;

@@ -1,10 +1,27 @@
-package Agenda;
+package POO.Agenda;
+
 
 public class Main {
     public static void main(String[] args) {
-        Agenda a = new Agenda();
+        Agenda agenda = new Agenda();
 
-        a.adicionarContato("Teste");
-        System.out.println(a);
+        agenda.adicionarContato("Arthur");
+
+        agenda.adicionarContato("Isabella", "bella@email.com", "49999998888");
+
+        agenda.adicionarContato("Bernardo", "barcaro@naotrabalhador.com", TipoContato.PROFISSIONAL, "4935661122", TipoContato.PESSOAL);
+
+        agenda.adicionarContato("Jaine");
+        
+        agenda.adicionarContato("Evellyn Isadora Pinto");
+
+        System.out.println(agenda);
+
+        System.out.println(agenda.buscarContato("Arthur"));
+
+        agenda.removerContato("Arthur");
+        agenda.adicionarEmail("Jaine", "schwarzenegger@email.com", TipoContato.PESSOAL);
+
+        System.out.println(agenda);
     }
 }
