@@ -1,0 +1,5 @@
+package Ex02;
+
+public enum Moveis {
+    SOFA, MESA, CADEIRA, CAMA, ARMARIO, ABAJUR, ESTANTE, CRIADO_MUDO, POLTRONA, RACK;
+}
