@@ -1,4 +1,4 @@
-package POO.Lista3.Ex01;
+package Ex01;
 
 public class Livro {
     private String titulo;

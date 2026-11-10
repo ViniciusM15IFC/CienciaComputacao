@@ -1,7 +1,7 @@
 //  Desenvolva um sistema para uma livraria. Crie classes para representar ‘Livro‘, ‘Autor‘
 // e ‘Editora‘, onde um livro é escrito por um autor e publicado por uma editora
 
-package POO.Lista3.Ex01;
+package Ex01;
 
 public class Editora {
     private String nome;
