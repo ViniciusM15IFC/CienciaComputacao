@@ -28,28 +28,47 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
+#include <stdint.h>
 
-#define TAM_TABELA 53          /* M: numero de chaves */
-#define MULTIPLICADOR 31       /* R: multiplicador do hash */
+#define TAM_TABELA 53    /* M: numero de chaves */
+#define MULTIPLICADOR 31 /* R: multiplicador do hash */
 #define TAM_NOME 128
 #define LARGURA_BARRA 50
-#define QUI2_CRITICO 69.83     /* qui-quadrado, 52 g.l., 5% */
+#define QUI2_CRITICO 69.83 /* qui-quadrado, 52 g.l., 5% */
+#define MAX_NIVEIS 5
+#define TENTATIVAS_POR_NIVEL 4
+#define VAZIO -1
+#define MAX_NIVEIS 4
+#define TENTATIVAS_POR_NIVEL 3
+
+typedef struct
+{
+    char **dados; /* Vetor de strings (nomes) */
+    int tamanho_total;
+    int inicio_nivel[MAX_NIVEIS];
+    int tam_nivel[MAX_NIVEIS];
+    int inicio_overflow;
+    int tam_overflow;
+} FunnelHash;
 
 /* ---------- TAD Pessoa ---------- */
 
-typedef struct sPessoa {
+typedef struct sPessoa
+{
     char nome[TAM_NOME];
 } Pessoa;
 
 /* ---------- Lista encadeada dupla ---------- */
 
-typedef struct sElemento {
+typedef struct sElemento
+{
     struct sElemento *next;
     struct sElemento *prev;
     Pessoa pessoa;
 } Elemento;
 
-typedef struct sLista {
+typedef struct sLista
+{
     struct sElemento *head;
     struct sElemento *tail;
     int size;
@@ -57,7 +76,8 @@ typedef struct sLista {
 
 /* ---------- Tabela hash ---------- */
 
-typedef struct sTabelaHash {
+typedef struct sTabelaHash
+{
     Lista baldes[TAM_TABELA]; /* uma lista dupla por chave */
     int total;                /* N: total de nomes na tabela */
 } TabelaHash;
@@ -75,9 +95,8 @@ static const char *NOMES_EXEMPLO[] = {
     "Renata Freitas", "Vinicius Correia", "Isabela Monteiro",
     "Andre Cavalcanti", "Tatiane Batista", "Ricardo Moura",
     "Natalia Campos", "Sergio Borges", "Priscila Farias", "Caio Duarte",
-    "Bianca Azevedo", "Daniel Machado"
-};
-#define QTD_EXEMPLO ((int) (sizeof(NOMES_EXEMPLO) / sizeof(NOMES_EXEMPLO[0])))
+    "Bianca Azevedo", "Daniel Machado"};
+#define QTD_EXEMPLO ((int)(sizeof(NOMES_EXEMPLO) / sizeof(NOMES_EXEMPLO[0])))
 
 /* ============================================================
    Funcao de hash (hashing modular iterativo)
@@ -85,25 +104,119 @@ static const char *NOMES_EXEMPLO[] = {
        h = (R * h + c) % M
    Aplicar o % M a cada passo evita overflow (como no slide).
    Retorna a chave, entre 0 e M-1.
-   ============================================================ */
-unsigned int hashNome(const char *nome) {
-    unsigned long h = 0;
-    const unsigned char *p = (const unsigned char *) nome;
+   ============================================================ *
 
-    while (*p != '\0') {
-        h = (MULTIPLICADOR * h + (unsigned long) toupper(*p)) % TAM_TABELA;
-        p++;
+
+/* Funcao hash parametrizada pelo nivel para gerar posicoes independentes */
+uint32_t hashNivel(int chave, int nivel, int tam_subtabela)
+{
+    uint32_t h = (uint32_t)chave ^ (nivel * 0x9E3779B9U);
+    h = ((h >> 16) ^ h) * 0x45d9f3bU;
+    h = ((h >> 16) ^ h);
+    return h % tam_subtabela;
+}
+
+/* Inicializa a tabela dividindo a memoria em formato de funil */
+FunnelHash *criarFunnel(int capacidade)
+{
+    FunnelHash *fh = malloc(sizeof(FunnelHash));
+    fh->tamanho_total = capacidade;
+    fh->dados = malloc(capacidade * sizeof(int));
+    for (int i = 0; i < capacidade; i++)
+        fh->dados[i] = VAZIO;
+
+    /* Reserva 10% finais para overflow e divide 90% nos niveis do funil */
+    fh->tam_overflow = capacidade / 10;
+    int restante = capacidade - fh->tam_overflow;
+    int offset = 0;
+
+    for (int i = 0; i < MAX_NIVEIS; i++)
+    {
+        fh->inicio_nivel[i] = offset;
+        /* Cada nivel pega cerca de metade do espaco restante (efeito funil) */
+        fh->tam_nivel[i] = (i == MAX_NIVEIS - 1) ? restante : (restante / 2);
+        offset += fh->tam_nivel[i];
+        restante -= fh->tam_nivel[i];
+    }
+    fh->inicio_overflow = offset;
+    return fh;
+}
+
+/* Insercao gulosa descendo pelo funil */
+bool inserirFunnel(FunnelHash *fh, int chave)
+{
+    /* 1. Tenta inserir nos niveis hierarquicos do funil */
+    for (int nivel = 0; nivel < MAX_NIVEIS; nivel++)
+    {
+        int tam = fh->tam_nivel[nivel];
+        int base = fh->inicio_nivel[nivel];
+
+        for (int t = 0; t < TENTATIVAS_POR_NIVEL; t++)
+        {
+            /* Combina o nivel e a tentativa para sondar posicoes distintas */
+            uint32_t pos = hashNivel(chave + t * 17, nivel, tam);
+            int idx = base + pos;
+
+            if (fh->dados[idx] == VAZIO)
+            {
+                fh->dados[idx] = chave;
+                return true;
+            }
+        }
     }
 
-    return (unsigned int) h;
+    /* 2. Se o funil estiver muito cheio, cai no reservatorio de overflow */
+    for (int i = 0; i < fh->tam_overflow; i++)
+    {
+        int idx = fh->inicio_overflow + i;
+        if (fh->dados[idx] == VAZIO)
+        {
+            fh->dados[idx] = chave;
+            return true;
+        }
+    }
+
+    return false; /* Tabela 100% lotada */
+}
+
+/* Busca seguindo exatamente o mesmo trajeto do funil */
+bool buscarFunnel(FunnelHash *fh, int chave)
+{
+    for (int nivel = 0; nivel < MAX_NIVEIS; nivel++)
+    {
+        int tam = fh->tam_nivel[nivel];
+        int base = fh->inicio_nivel[nivel];
+
+        for (int t = 0; t < TENTATIVAS_POR_NIVEL; t++)
+        {
+            uint32_t pos = hashNivel(chave + t * 17, nivel, tam);
+            int idx = base + pos;
+
+            if (fh->dados[idx] == chave)
+                return true;
+            /* Nota: no Funnel Hashing NAO paramos ao achar VAZIO,
+               pois uma tentativa anterior pode ter sido preenchida e depois removida,
+               ou o item pode ter escorrido para o proximo nivel. */
+        }
+    }
+
+    for (int i = 0; i < fh->tam_overflow; i++)
+    {
+        if (fh->dados[fh->inicio_overflow + i] == chave)
+            return true;
+    }
+
+    return false;
 }
 
 /* ============================================================
    Cria elemento (no) com o nome informado
    ============================================================ */
-Elemento *criaElemento(const char *nome) {
-    Elemento *novo = (Elemento *) malloc(sizeof(Elemento));
-    if (novo == NULL) {
+Elemento *criaElemento(const char *nome)
+{
+    Elemento *novo = (Elemento *)malloc(sizeof(Elemento));
+    if (novo == NULL)
+    {
         printf("Erro ao alocar memoria para o elemento.\n");
         exit(1);
     }
@@ -117,15 +230,18 @@ Elemento *criaElemento(const char *nome) {
 /* ============================================================
    Cria a tabela hash (todas as listas comecam vazias)
    ============================================================ */
-TabelaHash *criaTabela(void) {
-    TabelaHash *t = (TabelaHash *) malloc(sizeof(TabelaHash));
+TabelaHash *criaTabela(void)
+{
+    TabelaHash *t = (TabelaHash *)malloc(sizeof(TabelaHash));
     int i;
 
-    if (t == NULL) {
+    if (t == NULL)
+    {
         printf("Erro ao alocar memoria para a tabela.\n");
         exit(1);
     }
-    for (i = 0; i < TAM_TABELA; i++) {
+    for (i = 0; i < TAM_TABELA; i++)
+    {
         t->baldes[i].head = NULL;
         t->baldes[i].tail = NULL;
         t->baldes[i].size = 0;
@@ -137,13 +253,16 @@ TabelaHash *criaTabela(void) {
 /* ============================================================
    Libera toda a memoria da tabela
    ============================================================ */
-void liberaTabela(TabelaHash *t) {
+void liberaTabela(TabelaHash *t)
+{
     int i;
     Elemento *atual, *proximo;
 
-    for (i = 0; i < TAM_TABELA; i++) {
+    for (i = 0; i < TAM_TABELA; i++)
+    {
         atual = t->baldes[i].head;
-        while (atual != NULL) {
+        while (atual != NULL)
+        {
             proximo = atual->next;
             free(atual);
             atual = proximo;
@@ -158,7 +277,8 @@ void liberaTabela(TabelaHash *t) {
    dupla daquela chave. Duplicados sao permitidos.
    Retorna a chave onde o nome foi inserido.
    ============================================================ */
-unsigned int insere(TabelaHash *t, const char *nome) {
+unsigned int insere(TabelaHash *t, const char *nome)
+{
     unsigned int chave = hashNome(nome);
     Lista *l = &t->baldes[chave];
     Elemento *novo = criaElemento(nome);
@@ -166,9 +286,12 @@ unsigned int insere(TabelaHash *t, const char *nome) {
     novo->prev = l->tail;
     novo->next = NULL;
 
-    if (l->tail != NULL) {
+    if (l->tail != NULL)
+    {
         l->tail->next = novo;
-    } else {
+    }
+    else
+    {
         l->head = novo; /* lista estava vazia */
     }
     l->tail = novo;
@@ -185,7 +308,8 @@ unsigned int insere(TabelaHash *t, const char *nome) {
    Retorna quantas vezes o nome aparece e imprime as posicoes
    (1 = primeiro da lista da chave).
    ============================================================ */
-int consulta(TabelaHash *t, const char *nome) {
+int consulta(TabelaHash *t, const char *nome)
+{
     unsigned int chave = hashNome(nome);
     Elemento *atual = t->baldes[chave].head;
     int posicao = 1;
@@ -194,10 +318,13 @@ int consulta(TabelaHash *t, const char *nome) {
     printf("Chave calculada para \"%s\": %u (lista com %d nome(s))\n",
            nome, chave, t->baldes[chave].size);
 
-    while (atual != NULL) {
-        if (strcmp(atual->pessoa.nome, nome) == 0) {
+    while (atual != NULL)
+    {
+        if (strcmp(atual->pessoa.nome, nome) == 0)
+        {
             ocorrencias++;
-            if (ocorrencias <= 20) {
+            if (ocorrencias <= 20)
+            {
                 printf("   encontrado na posicao %d da chave %u\n", posicao, chave);
             }
         }
@@ -205,7 +332,8 @@ int consulta(TabelaHash *t, const char *nome) {
         posicao++;
     }
 
-    if (ocorrencias > 20) {
+    if (ocorrencias > 20)
+    {
         printf("   ... (%d ocorrencias no total, exibidas as 20 primeiras)\n",
                ocorrencias);
     }
@@ -216,16 +344,23 @@ int consulta(TabelaHash *t, const char *nome) {
 /* ============================================================
    Remove um no especifico da lista dupla (usa prev e next)
    ============================================================ */
-static void removeElemento(Lista *l, Elemento *e) {
-    if (e->prev != NULL) {
+static void removeElemento(Lista *l, Elemento *e)
+{
+    if (e->prev != NULL)
+    {
         e->prev->next = e->next;
-    } else {
+    }
+    else
+    {
         l->head = e->next; /* era o primeiro */
     }
 
-    if (e->next != NULL) {
+    if (e->next != NULL)
+    {
         e->next->prev = e->prev;
-    } else {
+    }
+    else
+    {
         l->tail = e->prev; /* era o ultimo */
     }
 
@@ -238,13 +373,16 @@ static void removeElemento(Lista *l, Elemento *e) {
    Remove a PRIMEIRA ocorrencia do nome na lista da sua chave.
    Retorna 1 se removeu, 0 se o nome nao existe.
    ============================================================ */
-int remove_nome(TabelaHash *t, const char *nome) {
+int remove_nome(TabelaHash *t, const char *nome)
+{
     unsigned int chave = hashNome(nome);
     Lista *l = &t->baldes[chave];
     Elemento *atual = l->head;
 
-    while (atual != NULL) {
-        if (strcmp(atual->pessoa.nome, nome) == 0) {
+    while (atual != NULL)
+    {
+        if (strcmp(atual->pessoa.nome, nome) == 0)
+        {
             removeElemento(l, atual);
             t->total--;
             return 1;
@@ -258,7 +396,8 @@ int remove_nome(TabelaHash *t, const char *nome) {
 /* ============================================================
    Quantidade de elementos por chave
    ============================================================ */
-int quantidadePorChave(TabelaHash *t, int chave) {
+int quantidadePorChave(TabelaHash *t, int chave)
+{
     return t->baldes[chave].size;
 }
 
@@ -272,27 +411,32 @@ int quantidadePorChave(TabelaHash *t, int chave) {
      ordenadas; elementos iguais sao divididos de forma
      equilibrada, o que importa por causa dos duplicados).
    ============================================================ */
-static void trocaPessoas(Elemento *a, Elemento *b) {
+static void trocaPessoas(Elemento *a, Elemento *b)
+{
     Pessoa t = a->pessoa;
     a->pessoa = b->pessoa;
     b->pessoa = t;
 }
 
-static void quicksortLED(Elemento *lo, int n) {
+static void quicksortLED(Elemento *lo, int n)
+{
     Elemento *i, *j, *meio, *hi;
     int ii, jj, k;
     char pivo[TAM_NOME];
 
-    if (n < 2) {
+    if (n < 2)
+    {
         return;
     }
 
     hi = lo;
-    for (k = 0; k < n - 1; k++) {
+    for (k = 0; k < n - 1; k++)
+    {
         hi = hi->next;
     }
     meio = lo;
-    for (k = 0; k < n / 2; k++) {
+    for (k = 0; k < n / 2; k++)
+    {
         meio = meio->next;
     }
     strcpy(pivo, meio->pessoa.nome);
@@ -302,16 +446,20 @@ static void quicksortLED(Elemento *lo, int n) {
     j = hi;
     jj = n - 1;
 
-    do {
-        while (strcmp(i->pessoa.nome, pivo) < 0) {
+    do
+    {
+        while (strcmp(i->pessoa.nome, pivo) < 0)
+        {
             i = i->next;
             ii++;
         }
-        while (strcmp(j->pessoa.nome, pivo) > 0) {
+        while (strcmp(j->pessoa.nome, pivo) > 0)
+        {
             j = j->prev;
             jj--;
         }
-        if (ii <= jj) {
+        if (ii <= jj)
+        {
             trocaPessoas(i, j);
             i = i->next;
             ii++;
@@ -329,9 +477,11 @@ static void quicksortLED(Elemento *lo, int n) {
 /* ------------------------------------------------------------
    Ordena (alfabeticamente) os nomes da lista de uma chave
    ------------------------------------------------------------ */
-void ordenaChave(TabelaHash *t, int chave) {
+void ordenaChave(TabelaHash *t, int chave)
+{
     Lista *l = &t->baldes[chave];
-    if (l->size > 1) {
+    if (l->size > 1)
+    {
         quicksortLED(l->head, l->size);
     }
 }
@@ -339,11 +489,14 @@ void ordenaChave(TabelaHash *t, int chave) {
 /* ------------------------------------------------------------
    Verifica se a lista de uma chave esta em ordem crescente
    ------------------------------------------------------------ */
-int chaveOrdenada(TabelaHash *t, int chave) {
+int chaveOrdenada(TabelaHash *t, int chave)
+{
     Elemento *atual = t->baldes[chave].head;
 
-    while (atual != NULL && atual->next != NULL) {
-        if (strcmp(atual->pessoa.nome, atual->next->pessoa.nome) > 0) {
+    while (atual != NULL && atual->next != NULL)
+    {
+        if (strcmp(atual->pessoa.nome, atual->next->pessoa.nome) > 0)
+        {
             return 0;
         }
         atual = atual->next;
@@ -354,25 +507,29 @@ int chaveOrdenada(TabelaHash *t, int chave) {
 /* ------------------------------------------------------------
    Imprime os nomes de uma chave (maximo 'limite'; 0 = todos)
    ------------------------------------------------------------ */
-void imprimeChave(TabelaHash *t, int chave, int limite) {
+void imprimeChave(TabelaHash *t, int chave, int limite)
+{
     Lista *l = &t->baldes[chave];
     Elemento *atual = l->head;
     int posicao = 1;
 
     printf("Chave %d (%d nome(s)):\n", chave, l->size);
 
-    if (atual == NULL) {
+    if (atual == NULL)
+    {
         printf("   (vazia)\n");
         return;
     }
 
-    while (atual != NULL && (limite == 0 || posicao <= limite)) {
+    while (atual != NULL && (limite == 0 || posicao <= limite))
+    {
         printf("   %d. %s\n", posicao, atual->pessoa.nome);
         atual = atual->next;
         posicao++;
     }
 
-    if (atual != NULL) {
+    if (atual != NULL)
+    {
         printf("   ... (+%d nome(s) nao exibidos)\n", l->size - (posicao - 1));
     }
 }
@@ -380,18 +537,22 @@ void imprimeChave(TabelaHash *t, int chave, int limite) {
 /* ------------------------------------------------------------
    Raiz quadrada (metodo de Newton) para nao depender da libm
    ------------------------------------------------------------ */
-static double raiz(double x) {
+static double raiz(double x)
+{
     double r, ant;
     int k;
 
-    if (x <= 0.0) {
+    if (x <= 0.0)
+    {
         return 0.0;
     }
     r = (x > 1.0) ? x / 2.0 : 1.0;
-    for (k = 0; k < 100; k++) {
+    for (k = 0; k < 100; k++)
+    {
         ant = r;
         r = 0.5 * (r + x / r);
-        if (r == ant) {
+        if (r == ant)
+        {
             break;
         }
     }
@@ -406,46 +567,55 @@ static double raiz(double x) {
      razao entre o desvio observado e o esperado se o hashing
      fosse uniforme, e teste qui-quadrado.
    ============================================================ */
-void imprimeHistograma(TabelaHash *t) {
+void imprimeHistograma(TabelaHash *t)
+{
     int i, j, max, min, chaveMax, chaveMin, porBarra, barra, ocupadas;
     double N, M, media, soma, var, desvio, desvioEsperado, qui2, d;
 
-    if (t->total == 0) {
+    if (t->total == 0)
+    {
         printf("Tabela vazia. Nao ha o que mostrar no histograma.\n");
         return;
     }
 
-    N = (double) t->total;
-    M = (double) TAM_TABELA;
+    N = (double)t->total;
+    M = (double)TAM_TABELA;
 
     max = min = t->baldes[0].size;
     chaveMax = chaveMin = 0;
     ocupadas = 0;
-    for (i = 0; i < TAM_TABELA; i++) {
-        if (t->baldes[i].size > max) {
+    for (i = 0; i < TAM_TABELA; i++)
+    {
+        if (t->baldes[i].size > max)
+        {
             max = t->baldes[i].size;
             chaveMax = i;
         }
-        if (t->baldes[i].size < min) {
+        if (t->baldes[i].size < min)
+        {
             min = t->baldes[i].size;
             chaveMin = i;
         }
-        if (t->baldes[i].size > 0) {
+        if (t->baldes[i].size > 0)
+        {
             ocupadas++;
         }
     }
 
     porBarra = (max + LARGURA_BARRA - 1) / LARGURA_BARRA;
-    if (porBarra < 1) {
+    if (porBarra < 1)
+    {
         porBarra = 1;
     }
 
     printf("\n===== HISTOGRAMA: nomes por chave (cada # = %d nome(s)) =====\n",
            porBarra);
-    for (i = 0; i < TAM_TABELA; i++) {
+    for (i = 0; i < TAM_TABELA; i++)
+    {
         barra = (t->baldes[i].size + porBarra - 1) / porBarra;
         printf("Chave %2d | ", i);
-        for (j = 0; j < barra; j++) {
+        for (j = 0; j < barra; j++)
+        {
             putchar('#');
         }
         printf(" %d\n", t->baldes[i].size);
@@ -454,8 +624,9 @@ void imprimeHistograma(TabelaHash *t) {
     media = N / M;
     soma = 0.0;
     qui2 = 0.0;
-    for (i = 0; i < TAM_TABELA; i++) {
-        d = (double) t->baldes[i].size - media;
+    for (i = 0; i < TAM_TABELA; i++)
+    {
+        d = (double)t->baldes[i].size - media;
         soma += d * d;
         qui2 += (d * d) / media;
     }
@@ -472,18 +643,23 @@ void imprimeHistograma(TabelaHash *t) {
     printf("Colisoes (N - ocupadas)   : %d\n", t->total - ocupadas);
     printf("Menor lista               : %d (chave %d)\n", min, chaveMin);
     printf("Maior lista               : %d (chave %d)\n", max, chaveMax);
+    printf("Diferenca                 : %d \n", max - min);
     printf("Media por chave           : %.2f\n", media);
     printf("Desvio padrao observado   : %.2f\n", desvio);
     printf("Desvio esperado (uniforme): %.2f\n", desvioEsperado);
-    if (desvioEsperado > 0.0) {
+    if (desvioEsperado > 0.0)
+    {
         printf("Razao observado/esperado  : %.2f (perto de 1 = uniforme)\n",
                desvio / desvioEsperado);
     }
     printf("Qui-quadrado              : %.2f (critico 5%%, 52 g.l.: %.2f)\n",
            qui2, QUI2_CRITICO);
-    if (qui2 <= QUI2_CRITICO) {
+    if (qui2 <= QUI2_CRITICO)
+    {
         printf("   -> nao rejeita a hipotese de distribuicao uniforme\n");
-    } else {
+    }
+    else
+    {
         printf("   -> rejeita a hipotese de distribuicao uniforme\n");
     }
     printf("Obs.: com N muito grande o teste qui-quadrado rejeita ate\n");
@@ -494,15 +670,18 @@ void imprimeHistograma(TabelaHash *t) {
    Exporta o histograma em CSV (chave,quantidade)
    Retorna 1 se gravou, 0 se nao conseguiu abrir o arquivo.
    ------------------------------------------------------------ */
-int exportaHistogramaCSV(TabelaHash *t, const char *caminho) {
+int exportaHistogramaCSV(TabelaHash *t, const char *caminho)
+{
     FILE *f = fopen(caminho, "w");
     int i;
 
-    if (f == NULL) {
+    if (f == NULL)
+    {
         return 0;
     }
     fprintf(f, "chave,quantidade\n");
-    for (i = 0; i < TAM_TABELA; i++) {
+    for (i = 0; i < TAM_TABELA; i++)
+    {
         fprintf(f, "%d,%d\n", i, t->baldes[i].size);
     }
     fclose(f);
@@ -516,7 +695,8 @@ int exportaHistogramaCSV(TabelaHash *t, const char *caminho) {
    Retorna 1 se abriu o arquivo, 0 caso contrario.
    ============================================================ */
 int carregaArquivo(TabelaHash *t, const char *caminho,
-                   int *inseridos, int *truncados) {
+                   int *inseridos, int *truncados)
+{
     FILE *f = fopen(caminho, "r");
     char linha[TAM_NOME];
     char *inicio;
@@ -526,43 +706,50 @@ int carregaArquivo(TabelaHash *t, const char *caminho,
     *inseridos = 0;
     *truncados = 0;
 
-    if (f == NULL) {
+    if (f == NULL)
+    {
         return 0;
     }
 
-    while (fgets(linha, sizeof(linha), f) != NULL) {
+    while (fgets(linha, sizeof(linha), f) != NULL)
+    {
         len = strlen(linha);
 
-        if (len > 0 && linha[len - 1] == '\n') {
+        if (len > 0 && linha[len - 1] == '\n')
+        {
             linha[len - 1] = '\0';
             len--;
-        } else if (!feof(f)) {
+        }
+        else if (!feof(f))
+        {
             /* linha maior que o buffer: descarta o resto dela */
-            while ((c = fgetc(f)) != '\n' && c != EOF) {
+            while ((c = fgetc(f)) != '\n' && c != EOF)
+            {
                 /* descarta */
             }
             (*truncados)++;
         }
 
-        while (len > 0 && (linha[len - 1] == '\r' || linha[len - 1] == ' '
-                           || linha[len - 1] == '\t')) {
+        while (len > 0 && (linha[len - 1] == '\r' || linha[len - 1] == ' ' || linha[len - 1] == '\t'))
+        {
             linha[len - 1] = '\0';
             len--;
         }
 
         inicio = linha;
-        if (primeira && (unsigned char) inicio[0] == 0xEF
-            && (unsigned char) inicio[1] == 0xBB
-            && (unsigned char) inicio[2] == 0xBF) {
+        if (primeira && (unsigned char)inicio[0] == 0xEF && (unsigned char)inicio[1] == 0xBB && (unsigned char)inicio[2] == 0xBF)
+        {
             inicio += 3; /* pula o BOM */
         }
         primeira = 0;
 
-        while (*inicio == ' ' || *inicio == '\t') {
+        while (*inicio == ' ' || *inicio == '\t')
+        {
             inicio++;
         }
 
-        if (*inicio == '\0') {
+        if (*inicio == '\0')
+        {
             continue; /* linha vazia */
         }
 
@@ -577,9 +764,11 @@ int carregaArquivo(TabelaHash *t, const char *caminho,
 /* ------------------------------------------------------------
    Limpa o buffer de entrada (restos deixados pelo scanf)
    ------------------------------------------------------------ */
-void limpaBuffer(void) {
+void limpaBuffer(void)
+{
     int c;
-    while ((c = getchar()) != '\n' && c != EOF) {
+    while ((c = getchar()) != '\n' && c != EOF)
+    {
         /* descarta */
     }
 }
@@ -587,8 +776,10 @@ void limpaBuffer(void) {
 /* ------------------------------------------------------------
    Le um inteiro do teclado. Retorna 1 se leu, 0 se invalido.
    ------------------------------------------------------------ */
-int lerInt(int *valor) {
-    if (scanf("%d", valor) != 1) {
+int lerInt(int *valor)
+{
+    if (scanf("%d", valor) != 1)
+    {
         limpaBuffer();
         printf("Entrada invalida.\n");
         return 0;
@@ -601,17 +792,24 @@ int lerInt(int *valor) {
    Le um texto (aceita espacos), remove o '\n' final e descarta
    o excesso se a linha for maior que o buffer
    ------------------------------------------------------------ */
-void leTexto(char *destino, int tamanho) {
+void leTexto(char *destino, int tamanho)
+{
     size_t len;
 
-    if (fgets(destino, tamanho, stdin) != NULL) {
+    if (fgets(destino, tamanho, stdin) != NULL)
+    {
         len = strlen(destino);
-        if (len > 0 && destino[len - 1] == '\n') {
+        if (len > 0 && destino[len - 1] == '\n')
+        {
             destino[len - 1] = '\0';
-        } else {
+        }
+        else
+        {
             limpaBuffer();
         }
-    } else {
+    }
+    else
+    {
         destino[0] = '\0';
     }
 }
@@ -619,12 +817,15 @@ void leTexto(char *destino, int tamanho) {
 /* ------------------------------------------------------------
    Le uma chave valida (0 a M-1). Retorna 1 se valida.
    ------------------------------------------------------------ */
-static int lerChave(int *chave) {
+static int lerChave(int *chave)
+{
     printf("Digite a chave (0 a %d): ", TAM_TABELA - 1);
-    if (!lerInt(chave)) {
+    if (!lerInt(chave))
+    {
         return 0;
     }
-    if (*chave < 0 || *chave >= TAM_TABELA) {
+    if (*chave < 0 || *chave >= TAM_TABELA)
+    {
         printf("Chave fora do intervalo.\n");
         return 0;
     }
@@ -634,7 +835,8 @@ static int lerChave(int *chave) {
 /* ------------------------------------------------------------
    Exibe o menu de opcoes
    ------------------------------------------------------------ */
-void exibeMenu(void) {
+void exibeMenu(void)
+{
     printf("\n===== MENU - Tabela Hash (M=%d) =====\n", TAM_TABELA);
     printf("1  - Inserir nome\n");
     printf("2  - Consultar nome\n");
@@ -657,9 +859,11 @@ void exibeMenu(void) {
    Insere os nomes de exemplo na tabela recebida. As demais
    operacoes continuam sendo feitas manualmente pelo menu.
    ============================================================ */
-void preencheTabela(TabelaHash *t) {
+void preencheTabela(TabelaHash *t)
+{
     int i;
-    for (i = 0; i < QTD_EXEMPLO; i++) {
+    for (i = 0; i < QTD_EXEMPLO; i++)
+    {
         insere(t, NOMES_EXEMPLO[i]);
     }
 }
@@ -667,20 +871,23 @@ void preencheTabela(TabelaHash *t) {
 /* ------------------------------------------------------------
    Ordena todas as chaves e confere se cada lista ficou em ordem
    ------------------------------------------------------------ */
-static void ordenaTodas(TabelaHash *t) {
+static void ordenaTodas(TabelaHash *t)
+{
     int i, ok = 1;
     clock_t ini = clock();
 
-    for (i = 0; i < TAM_TABELA; i++) {
+    for (i = 0; i < TAM_TABELA; i++)
+    {
         ordenaChave(t, i);
-        if (!chaveOrdenada(t, i)) {
+        if (!chaveOrdenada(t, i))
+        {
             ok = 0;
             printf("ERRO: a chave %d nao ficou ordenada.\n", i);
         }
     }
 
     printf("Todas as chaves ordenadas em %.3f s. Conferencia: %s\n",
-           (double) (clock() - ini) / CLOCKS_PER_SEC,
+           (double)(clock() - ini) / CLOCKS_PER_SEC,
            ok ? "todas em ordem crescente" : "FALHOU");
 }
 
@@ -691,12 +898,14 @@ static void ordenaTodas(TabelaHash *t) {
    consulta (inclusive duplicado e inexistente), remocao,
    quantidade por chave, ordenacao de uma chave e histograma.
    ============================================================ */
-void fazTudo(void) {
+void fazTudo(void)
+{
     TabelaHash *t = criaTabela();
     int i, chaveMax, max;
 
     printf("=== Funcao hash (primeiros nomes) ===\n");
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 5; i++)
+    {
         printf("hash(\"%s\") = %u\n", NOMES_EXEMPLO[i], hashNome(NOMES_EXEMPLO[i]));
     }
     printf("hash(\"MARIA SILVA\") = %u  (maiusculas dao a mesma chave)\n",
@@ -720,16 +929,20 @@ void fazTudo(void) {
            consulta(t, "Joao Santos"));
 
     printf("\n=== Quantidade de nomes por chave (chaves ocupadas) ===\n");
-    for (i = 0; i < TAM_TABELA; i++) {
-        if (quantidadePorChave(t, i) > 0) {
+    for (i = 0; i < TAM_TABELA; i++)
+    {
+        if (quantidadePorChave(t, i) > 0)
+        {
             printf("Chave %2d: %d nome(s)\n", i, quantidadePorChave(t, i));
         }
     }
 
     max = 0;
     chaveMax = 0;
-    for (i = 0; i < TAM_TABELA; i++) {
-        if (quantidadePorChave(t, i) > max) {
+    for (i = 0; i < TAM_TABELA; i++)
+    {
+        if (quantidadePorChave(t, i) > max)
+        {
             max = quantidadePorChave(t, i);
             chaveMax = i;
         }
@@ -750,7 +963,8 @@ void fazTudo(void) {
 /* ============================================================
    Programa principal - menu interativo
    ============================================================ */
-int main(void) {
+int main(void)
+{
     TabelaHash *t = criaTabela();
     int opcao, chave, limite, inseridos, truncados;
     char nome[TAM_NOME];
@@ -758,119 +972,140 @@ int main(void) {
     clock_t ini;
     int continuar = 1;
 
-    while (continuar) {
+    while (continuar)
+    {
         exibeMenu();
 
-        if (!lerInt(&opcao)) {
+        if (!lerInt(&opcao))
+        {
             continue;
         }
 
-        switch (opcao) {
-            case 1:
-                printf("Digite o nome a inserir: ");
-                leTexto(nome, TAM_NOME);
-                if (nome[0] == '\0') {
-                    printf("Nome vazio. Nada inserido.\n");
-                } else {
-                    chave = (int) insere(t, nome);
-                    printf("\"%s\" inserido na chave %d (agora com %d nome(s)).\n",
-                           nome, chave, quantidadePorChave(t, chave));
+        switch (opcao)
+        {
+        case 1:
+            printf("Digite o nome a inserir: ");
+            leTexto(nome, TAM_NOME);
+            if (nome[0] == '\0')
+            {
+                printf("Nome vazio. Nada inserido.\n");
+            }
+            else
+            {
+                chave = (int)insere(t, nome);
+                printf("\"%s\" inserido na chave %d (agora com %d nome(s)).\n",
+                       nome, chave, quantidadePorChave(t, chave));
+            }
+            break;
+
+        case 2:
+            printf("Digite o nome a consultar: ");
+            leTexto(nome, TAM_NOME);
+            if (consulta(t, nome) == 0)
+            {
+                printf("Nome nao encontrado.\n");
+            }
+            break;
+
+        case 3:
+            printf("Digite o nome a remover: ");
+            leTexto(nome, TAM_NOME);
+            if (remove_nome(t, nome))
+            {
+                printf("Primeira ocorrencia de \"%s\" removida.\n", nome);
+            }
+            else
+            {
+                printf("Nome nao encontrado. Nada removido.\n");
+            }
+            break;
+
+        case 4:
+            if (lerChave(&chave))
+            {
+                printf("A chave %d tem %d nome(s). Total na tabela: %d.\n",
+                       chave, quantidadePorChave(t, chave), t->total);
+            }
+            break;
+
+        case 5:
+            if (lerChave(&chave))
+            {
+                printf("Quantos nomes exibir (0 = todos)? ");
+                if (lerInt(&limite) && limite >= 0)
+                {
+                    imprimeChave(t, chave, limite);
                 }
-                break;
+            }
+            break;
 
-            case 2:
-                printf("Digite o nome a consultar: ");
-                leTexto(nome, TAM_NOME);
-                if (consulta(t, nome) == 0) {
-                    printf("Nome nao encontrado.\n");
+        case 6:
+            if (lerChave(&chave))
+            {
+                ordenaChave(t, chave);
+                printf("Chave %d ordenada. Conferencia: %s\n", chave,
+                       chaveOrdenada(t, chave) ? "em ordem crescente" : "FALHOU");
+            }
+            break;
+
+        case 7:
+            ordenaTodas(t);
+            break;
+
+        case 8:
+            imprimeHistograma(t);
+            break;
+
+        case 9:
+            if (exportaHistogramaCSV(t, "histograma.csv"))
+            {
+                printf("Histograma gravado em histograma.csv\n");
+            }
+            else
+            {
+                printf("Nao foi possivel gravar histograma.csv\n");
+            }
+            break;
+
+        case 10:
+            printf("Caminho do arquivo (um nome por linha): ");
+            leTexto(caminho, sizeof(caminho));
+            ini = clock();
+            if (carregaArquivo(t, caminho, &inseridos, &truncados))
+            {
+                printf("%d nome(s) inseridos em %.3f s. Total na tabela: %d.\n",
+                       inseridos, (double)(clock() - ini) / CLOCKS_PER_SEC,
+                       t->total);
+                if (truncados > 0)
+                {
+                    printf("Aviso: %d linha(s) maiores que %d caracteres foram truncadas.\n",
+                           truncados, TAM_NOME - 1);
                 }
-                break;
+            }
+            else
+            {
+                printf("Nao foi possivel abrir o arquivo \"%s\".\n", caminho);
+            }
+            break;
 
-            case 3:
-                printf("Digite o nome a remover: ");
-                leTexto(nome, TAM_NOME);
-                if (remove_nome(t, nome)) {
-                    printf("Primeira ocorrencia de \"%s\" removida.\n", nome);
-                } else {
-                    printf("Nome nao encontrado. Nada removido.\n");
-                }
-                break;
+        case 11:
+            fazTudo();
+            break;
 
-            case 4:
-                if (lerChave(&chave)) {
-                    printf("A chave %d tem %d nome(s). Total na tabela: %d.\n",
-                           chave, quantidadePorChave(t, chave), t->total);
-                }
-                break;
+        case 12:
+            preencheTabela(t);
+            printf("%d nomes de exemplo inseridos. Total: %d.\n",
+                   QTD_EXEMPLO, t->total);
+            break;
 
-            case 5:
-                if (lerChave(&chave)) {
-                    printf("Quantos nomes exibir (0 = todos)? ");
-                    if (lerInt(&limite) && limite >= 0) {
-                        imprimeChave(t, chave, limite);
-                    }
-                }
-                break;
+        case 0:
+            printf("Encerrando...\n");
+            continuar = 0;
+            break;
 
-            case 6:
-                if (lerChave(&chave)) {
-                    ordenaChave(t, chave);
-                    printf("Chave %d ordenada. Conferencia: %s\n", chave,
-                           chaveOrdenada(t, chave) ? "em ordem crescente" : "FALHOU");
-                }
-                break;
-
-            case 7:
-                ordenaTodas(t);
-                break;
-
-            case 8:
-                imprimeHistograma(t);
-                break;
-
-            case 9:
-                if (exportaHistogramaCSV(t, "histograma.csv")) {
-                    printf("Histograma gravado em histograma.csv\n");
-                } else {
-                    printf("Nao foi possivel gravar histograma.csv\n");
-                }
-                break;
-
-            case 10:
-                printf("Caminho do arquivo (um nome por linha): ");
-                leTexto(caminho, sizeof(caminho));
-                ini = clock();
-                if (carregaArquivo(t, caminho, &inseridos, &truncados)) {
-                    printf("%d nome(s) inseridos em %.3f s. Total na tabela: %d.\n",
-                           inseridos, (double) (clock() - ini) / CLOCKS_PER_SEC,
-                           t->total);
-                    if (truncados > 0) {
-                        printf("Aviso: %d linha(s) maiores que %d caracteres foram truncadas.\n",
-                               truncados, TAM_NOME - 1);
-                    }
-                } else {
-                    printf("Nao foi possivel abrir o arquivo \"%s\".\n", caminho);
-                }
-                break;
-
-            case 11:
-                fazTudo();
-                break;
-
-            case 12:
-                preencheTabela(t);
-                printf("%d nomes de exemplo inseridos. Total: %d.\n",
-                       QTD_EXEMPLO, t->total);
-                break;
-
-            case 0:
-                printf("Encerrando...\n");
-                continuar = 0;
-                break;
-
-            default:
-                printf("Opcao invalida. Tente novamente.\n");
-                break;
+        default:
+            printf("Opcao invalida. Tente novamente.\n");
+            break;
         }
     }
 
