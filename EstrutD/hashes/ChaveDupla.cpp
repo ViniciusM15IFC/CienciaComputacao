@@ -126,6 +126,7 @@ typedef struct sTabelaHash
     Lista baldes[TAM_TABELA]; /* uma lista dupla por chave */
     Bloom filtros[TAM_TABELA]; /* um filtro por lista */
     int total;                /* N: total de nomes na tabela */
+    int usarP2C;               /* 1 = Power of Two Choices; 0 = somente c1 */
 } TabelaHash;
 
 /* ---------- Estatisticas e modos de busca ---------- */
@@ -345,6 +346,7 @@ TabelaHash *criaTabela(void)
         bloomLimpa(&t->filtros[i]);
     }
     t->total = 0;
+    t->usarP2C = 1; /* comportamento padrao: com P2C */
     return t;
 }
 
@@ -384,7 +386,14 @@ unsigned int insere(TabelaHash *t, const char *nome)
     Elemento *novo;
 
     chavesDoHash(h, &c1, &c2);
-    chave = (t->baldes[c2].size < t->baldes[c1].size) ? c2 : c1;
+    if (t->usarP2C)
+    {
+        chave = (t->baldes[c2].size < t->baldes[c1].size) ? c2 : c1;
+    }
+    else
+    {
+        chave = c1; /* hashing tradicional: usa somente a primeira chave */
+    }
     l = &t->baldes[chave];
     novo = criaElemento(nome);
 
@@ -1120,7 +1129,7 @@ void imprimeHistograma(TabelaHash *t)
     printf("Desvio esperado (uniforme): %.2f\n", desvioEsperado);
     if (desvioEsperado > 0.0)
     {
-        printf("Razao observado/esperado  : %.2f (perto de 1 = uniforme)\n",
+        printf("Razao observado/esperado  : %.2f (menor = mais uniforme)\n",
                desvio / desvioEsperado);
     }
     printf("Qui-quadrado              : %.2f (critico 5%%, 52 g.l.: %.2f)\n",
@@ -1498,6 +1507,7 @@ void exibeMenu(void)
     printf("12 - Preencher tabela automaticamente\n");
     printf("13 - Contar ocorrencias de um nome\n");
     printf("14 - Comparar metodos de busca (medicao)\n");
+    printf("15 - Alternar hashing com/sem P2C (somente tabela vazia)\n");
     printf("0  - Sair\n");
     printf("Escolha uma opcao: ");
 }
@@ -1541,75 +1551,64 @@ static void ordenaTodas(TabelaHash *t)
 
 /* ============================================================
    fazTudo
-   Executa automaticamente, sem interacao do usuario, uma
-   sequencia que demonstra a tabela: insercao, colisao,
-   consulta (inclusive duplicado e inexistente), remocao,
-   quantidade por chave, ordenacao de uma chave e histograma.
+   Carrega nomes.txt duas vezes, uma tabela sem P2C e outra
+   com P2C, e exibe os dois histogramas em sequencia.
    ============================================================ */
 void fazTudo(void)
 {
-    TabelaHash *t = criaTabela();
-    int i, chaveMax, max;
+    TabelaHash *semP2C = criaTabela();
+    TabelaHash *comP2C = criaTabela();
+    int inseridosSem, inseridosCom;
+    int truncadosSem, truncadosCom;
+    clock_t ini;
 
-    printf("=== Funcao hash (primeiros nomes) ===\n");
-    for (i = 0; i < 5; i++)
+    semP2C->usarP2C = 0;
+    comP2C->usarP2C = 1;
+
+    printf("\n===== COMPARACAO: HASH SEM P2C x HASH COM P2C =====\n");
+    printf("Arquivo de entrada: nomes.txt (um nome por linha)\n");
+
+    ini = clock();
+    if (!carregaArquivo(semP2C, "nomes.txt", &inseridosSem, &truncadosSem))
     {
-        printf("hash(\"%s\") = %u\n", NOMES_EXEMPLO[i], hashNome(NOMES_EXEMPLO[i]));
-    }
-    printf("hash(\"MARIA SILVA\") = %u  (maiusculas dao a mesma chave)\n",
-           hashNome("MARIA SILVA"));
-
-    printf("\n=== Inserindo %d nomes (com 2 duplicados) ===\n", QTD_EXEMPLO);
-    preencheTabela(t);
-    printf("Total de nomes na tabela: %d\n", t->total);
-
-    printf("\n=== Contagem de ocorrencias ===\n");
-    printf("   -> %d ocorrencia(s)\n", contaOcorrencias(t, "Maria Silva"));
-    printf("   -> %d ocorrencia(s) (comparacao exata: minusculas nao batem)\n",
-           contaOcorrencias(t, "maria silva"));
-    printf("   -> %d ocorrencia(s)\n", contaOcorrencias(t, "Zenaide Prado"));
-
-    printf("\n=== Consulta com filtros e busca intercalada (para no 1o) ===\n");
-    printf("   -> %s\n", consulta(t, "Maria Silva") ? "encontrado" : "nao encontrado");
-    printf("   -> %s\n", consulta(t, "Zenaide Prado") ? "encontrado" : "nao encontrado");
-
-    printf("\n=== Remocao da primeira ocorrencia de \"Joao Santos\" ===\n");
-    printf("Antes : %d nome(s) no total\n", t->total);
-    printf("Removeu? %s\n", remove_nome(t, "Joao Santos") ? "SIM" : "NAO");
-    printf("Depois: %d nome(s) no total\n", t->total);
-    printf("   -> %d ocorrencia(s) de \"Joao Santos\" restante(s)\n",
-           contaOcorrencias(t, "Joao Santos"));
-
-    printf("\n=== Quantidade de nomes por chave (chaves ocupadas) ===\n");
-    for (i = 0; i < TAM_TABELA; i++)
-    {
-        if (quantidadePorChave(t, i) > 0)
-        {
-            printf("Chave %2d: %d nome(s)\n", i, quantidadePorChave(t, i));
-        }
+        printf("ERRO: nao foi possivel abrir nomes.txt.\n");
+        printf("Coloque nomes.txt na mesma pasta em que o programa e executado.\n");
+        liberaTabela(semP2C);
+        liberaTabela(comP2C);
+        return;
     }
 
-    max = 0;
-    chaveMax = 0;
-    for (i = 0; i < TAM_TABELA; i++)
+    if (!carregaArquivo(comP2C, "nomes.txt", &inseridosCom, &truncadosCom))
     {
-        if (quantidadePorChave(t, i) > max)
-        {
-            max = quantidadePorChave(t, i);
-            chaveMax = i;
-        }
+        /* O primeiro carregamento confirmou que o arquivo existe.
+           Esta verificacao protege contra falha ao reabri-lo. */
+        printf("ERRO: nao foi possivel carregar nomes.txt para a tabela com P2C.\n");
+        liberaTabela(semP2C);
+        liberaTabela(comP2C);
+        return;
     }
 
-    printf("\n=== Chave mais cheia (%d), ANTES de ordenar ===\n", chaveMax);
-    imprimeChave(t, chaveMax, 0);
-    ordenaChave(t, chaveMax);
-    printf("\n=== Chave %d DEPOIS do quicksort (ordenada: %s) ===\n",
-           chaveMax, chaveOrdenada(t, chaveMax) ? "SIM" : "NAO");
-    imprimeChave(t, chaveMax, 0);
+    printf("\nNomes carregados sem P2C: %d\n", inseridosSem);
+    printf("Nomes carregados com P2C: %d\n", inseridosCom);
+    printf("Tempo total de carregamento das duas tabelas: %.3f s\n",
+           (double)(clock() - ini) / CLOCKS_PER_SEC);
 
-    imprimeHistograma(t);
+    if (truncadosSem > 0 || truncadosCom > 0)
+    {
+        printf("Aviso: houve linhas maiores que %d caracteres; elas foram truncadas.\n",
+               TAM_NOME - 1);
+        printf("Linhas truncadas (sem P2C / com P2C): %d / %d\n",
+               truncadosSem, truncadosCom);
+    }
 
-    liberaTabela(t);
+    printf("\n\n========== HISTOGRAMA 1: HASH SEM P2C ==========\n");
+    imprimeHistograma(semP2C);
+
+    printf("\n\n========== HISTOGRAMA 2: HASH COM P2C ==========\n");
+    imprimeHistograma(comP2C);
+
+    liberaTabela(semP2C);
+    liberaTabela(comP2C);
 }
 
 /* ============================================================
@@ -1761,6 +1760,19 @@ int main(void)
             if (lerInt(&amostra) && amostra >= 0)
             {
                 comparaBuscas(t, amostra);
+            }
+            break;
+
+        case 15:
+            if (t->total != 0)
+            {
+                printf("Esvazie/reinicie a tabela antes de trocar o modo de hashing.\n");
+            }
+            else
+            {
+                t->usarP2C = !t->usarP2C;
+                printf("Modo selecionado: %s.\n",
+                       t->usarP2C ? "COM P2C" : "SEM P2C (somente primeira chave)");
             }
             break;
 
