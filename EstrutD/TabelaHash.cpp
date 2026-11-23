@@ -63,28 +63,67 @@ static const char *NOMES_EXEMPLO[] = {
     "Bianca Azevedo", "Daniel Machado"};
 #define QTD_EXEMPLO ((int)(sizeof(NOMES_EXEMPLO) / sizeof(NOMES_EXEMPLO[0])))
 
+static inline uint64_t rotl64(uint64_t x, unsigned int r)
+{
+    r &= 63u;
+    if (r == 0u)
+    {
+        return x;
+    }
+    return (x << r) | (x >> (64u - r));
+}
+
+static inline uint64_t misturaBidirecional64(uint64_t z)
+{
+    /* Empurra bits baixos para cima e propaga carry via multiplicacao impar */
+    z ^= z >> 29;
+    z *= 0x9e3779b97f4a7c15ULL;
+
+    /* Joga bits altos para baixo e gira para cruzar metades de 64 bits */
+    z ^= z >> 32;
+    z = rotl64(z, 17u);
+    z *= 0xbf58476d1ce4e5b9ULL;
+
+    /* Segunda dobra bidirecional antes da finalizacao */
+    z ^= z >> 27;
+    z = rotl64(z, 29u);
+    z *= 0x94d049bb133111ebULL;
+
+    z ^= z >> 31;
+    return z;
+}
+
 uint64_t hashFNV64(const char *nome)
 {
     const unsigned char *p = (const unsigned char *)nome;
-    uint64_t h = 14695981039346656037ULL;
-    unsigned int c;
+    uint64_t poli = 14695981039346656037ULL;
+    uint64_t estado = 0x243f6a8885a308d3ULL;
+    const uint64_t basePoli = 1315423911ULL;
+    const uint64_t primoFNV = 1099511628211ULL;
+    size_t idx = 0;
 
     while (*p != '\0')
     {
-        c = *p++;
+        unsigned int c = (unsigned int)(*p++);
         if (c >= 'a' && c <= 'z')
         {
-            c -= 'a' - 'A';
+            c -= (unsigned int)('a' - 'A');
         }
-        h ^= c;
-        h *= 1099511628211ULL;
+
+        /* 1. Acumulador polinomial com peso posicional */
+        poli = poli * basePoli + (uint64_t)c + (uint64_t)(idx & 0xFFu);
+
+        /* 2. Mistura encadeada com fator FNV-1a e deslocamento reverso */
+        estado ^= poli ^ rotl64((uint64_t)c, (unsigned int)((idx * 7u) & 63u));
+        estado *= primoFNV;
+        estado ^= estado >> 23;
+
+        idx++;
     }
-    h ^= h >> 33;
-    h *= 0xff51afd7ed558ccdULL;
-    h ^= h >> 33;
-    h *= 0xc4ceb9fe1a85ec53ULL;
-    h ^= h >> 33;
-    return h;
+
+    /* Incorpora tamanho/posicao final e aplica a mistura bidirecional */
+    estado ^= poli ^ ((uint64_t)idx * 0x9e3779b97f4a7c15ULL);
+    return misturaBidirecional64(estado);
 }
 
 static void chavesDoHash(uint64_t h, unsigned int *c1, unsigned int *c2)
