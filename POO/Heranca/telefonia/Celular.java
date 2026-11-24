@@ -1,3 +1,5 @@
+package telefonia;
+
 public class Celular extends SemFio {
     private String resolucao;
     private String SO;
