@@ -1,21 +1,28 @@
-/* Tabela hash com encadeamento, FNV-1a 64 bits, Bloom Filter e P2C. */
+/* Tabela hash com encadeamento (lista encadeada dupla), hash hibrido de
+   64 bits, P2C (Power of Two Choices) e filtro de Bloom por lista. */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <time.h>
 #include <stdint.h>
 
-#define TAM_TABELA 53 
+#define TAM_TABELA 53
 #define TAM_NOME 128
 #define LARGURA_BARRA 50
-#define QUI2_CRITICO 69.83 
 
-#define BLOOM_CAP_LISTA 2000
-#define BLOOM_BITS 19181u 
+/* Qui-quadrado com 52 g.l.: acima de QUI2_CRITICO rejeita a uniformidade;
+   abaixo de QUI2_INFERIOR a distribuicao e mais regular que o acaso. */
+#define QUI2_CRITICO 69.83
+#define QUI2_INFERIOR 36.44
+
+/* Bloom: m primo (~9,6 bits por nome para ~2000 nomes por lista), k = 7 */
+#define BLOOM_BITS 19181u
 #define BLOOM_K 7
 #define BLOOM_PALAVRAS ((BLOOM_BITS + 63u) / 64u)
+
+#define GOLDEN_RATIO_64 0x9e3779b97f4a7c15ULL
+#define MIX_MULT_1      0xbf58476d1ce4e5b9ULL
+#define MIX_MULT_2      0x94d049bb133111ebULL
 
 typedef struct sPessoa
 {
@@ -43,62 +50,47 @@ typedef struct sBloom
 
 typedef struct sTabelaHash
 {
-    Lista baldes[TAM_TABELA]; 
-    Bloom filtros[TAM_TABELA]; 
-    int total;                
-    int usarP2C;               
+    Lista baldes[TAM_TABELA];
+    Bloom filtros[TAM_TABELA];
+    int total;
 } TabelaHash;
 
-static const char *NOMES_EXEMPLO[] = {
-    "Maria Silva", "Joao Santos", "Ana Oliveira", "Pedro Souza",
-    "Carla Lima", "Lucas Ferreira", "Juliana Costa", "Rafael Alves",
-    "Fernanda Rocha", "Bruno Gomes", "Patricia Ribeiro", "Diego Martins",
-    "Camila Barbosa", "Gustavo Araujo", "Larissa Carvalho", "Thiago Melo",
-    "Beatriz Nunes", "Felipe Cardoso", "Aline Teixeira", "Marcos Pereira",
-    "Maria Silva", "Joao Santos", "Paula Fernandes", "Rodrigo Dias",
-    "Vanessa Moreira", "Eduardo Castro", "Amanda Ramos", "Leonardo Pinto",
-    "Renata Freitas", "Vinicius Correia", "Isabela Monteiro",
-    "Andre Cavalcanti", "Tatiane Batista", "Ricardo Moura",
-    "Natalia Campos", "Sergio Borges", "Priscila Farias", "Caio Duarte",
-    "Bianca Azevedo", "Daniel Machado"};
-#define QTD_EXEMPLO ((int)(sizeof(NOMES_EXEMPLO) / sizeof(NOMES_EXEMPLO[0])))
+/* ---------- Hash ---------- */
 
 static inline uint64_t rotl64(uint64_t x, unsigned int r)
 {
     r &= 63u;
-    if (r == 0u)
-    {
-        return x;
-    }
-    return (x << r) | (x >> (64u - r));
+    return (x << r) | (x >> ((64u - r) & 63u));
 }
 
 static inline uint64_t misturaBidirecional64(uint64_t z)
 {
-    /* Empurra bits baixos para cima e propaga carry via multiplicacao impar */
-    z ^= z >> 29;
-    z *= 0x9e3779b97f4a7c15ULL;
+    uint64_t maskBit17 = 0ULL - ((z >> 17) & 1ULL);
+    uint64_t multEtapa2 = (MIX_MULT_1 & maskBit17) |
+                          (MIX_MULT_2 & ~maskBit17);
 
-    /* Joga bits altos para baixo e gira para cruzar metades de 64 bits */
+    z ^= z >> 29;
+    z *= GOLDEN_RATIO_64;
+
     z ^= z >> 32;
     z = rotl64(z, 17u);
-    z *= 0xbf58476d1ce4e5b9ULL;
+    z *= multEtapa2;
 
-    /* Segunda dobra bidirecional antes da finalizacao */
     z ^= z >> 27;
     z = rotl64(z, 29u);
-    z *= 0x94d049bb133111ebULL;
+    z *= MIX_MULT_2;
 
     z ^= z >> 31;
     return z;
 }
 
-uint64_t hashFNV64(const char *nome)
+/* Hash de 64 bits: acumulador polinomial com base guiada por bit + mistura
+   estilo FNV-1a + finalizador bidirecional. Minusculas viram maiusculas. */
+uint64_t hashNome64(const char *nome)
 {
     const unsigned char *p = (const unsigned char *)nome;
     uint64_t poli = 14695981039346656037ULL;
     uint64_t estado = 0x243f6a8885a308d3ULL;
-    const uint64_t basePoli = 1315423911ULL;
     const uint64_t primoFNV = 1099511628211ULL;
     size_t idx = 0;
 
@@ -110,10 +102,11 @@ uint64_t hashFNV64(const char *nome)
             c -= (unsigned int)('a' - 'A');
         }
 
-        /* 1. Acumulador polinomial com peso posicional */
+        uint64_t maskBit13 = 0ULL - ((poli >> 13) & 1ULL);
+        uint64_t basePoli = (1315423911ULL & maskBit13) |
+                            (1000003ULL & ~maskBit13);
         poli = poli * basePoli + (uint64_t)c + (uint64_t)(idx & 0xFFu);
 
-        /* 2. Mistura encadeada com fator FNV-1a e deslocamento reverso */
         estado ^= poli ^ rotl64((uint64_t)c, (unsigned int)((idx * 7u) & 63u));
         estado *= primoFNV;
         estado ^= estado >> 23;
@@ -121,30 +114,28 @@ uint64_t hashFNV64(const char *nome)
         idx++;
     }
 
-    /* Incorpora tamanho/posicao final e aplica a mistura bidirecional */
-    estado ^= poli ^ ((uint64_t)idx * 0x9e3779b97f4a7c15ULL);
+    estado ^= poli ^ ((uint64_t)idx * GOLDEN_RATIO_64);
     return misturaBidirecional64(estado);
 }
 
+/* Duas chaves candidatas independentes: bits altos (c1) e bits baixos (c2) */
 static void chavesDoHash(uint64_t h, unsigned int *c1, unsigned int *c2)
 {
     *c1 = (unsigned int)(((h >> 32) * TAM_TABELA) >> 32);
     *c2 = (unsigned int)(((h & 0xFFFFFFFFULL) * TAM_TABELA) >> 32);
 }
 
-static void duasChaves(const char *nome, unsigned int *c1, unsigned int *c2)
-{
-    chavesDoHash(hashFNV64(nome), c1, c2);
-}
+/* ---------- Bloom filter ---------- */
 
 static uint64_t bloomMistura(uint64_t z)
 {
-    z += 0x9e3779b97f4a7c15ULL;
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    z += GOLDEN_RATIO_64;
+    z = (z ^ (z >> 30)) * MIX_MULT_1;
+    z = (z ^ (z >> 27)) * MIX_MULT_2;
     return z ^ (z >> 31);
 }
 
+/* Double hashing: posicao_i = (pos + i * passo) mod m, com m primo */
 static void bloomPosicaoPasso(uint64_t h, unsigned int *pos, unsigned int *passo)
 {
     uint64_t z = bloomMistura(h);
@@ -173,6 +164,7 @@ static void bloomAdiciona(Bloom *b, uint64_t h)
     }
 }
 
+/* 0 = ausente com certeza; 1 = possivelmente presente */
 static int bloomPossui(const Bloom *b, uint64_t h)
 {
     unsigned int pos, passo, i;
@@ -193,6 +185,7 @@ static int bloomPossui(const Bloom *b, uint64_t h)
     return 1;
 }
 
+/* Refaz o filtro da lista apos remocao para evitar falsos negativos */
 static void bloomReconstroi(TabelaHash *t, unsigned int chave)
 {
     Elemento *atual;
@@ -200,9 +193,11 @@ static void bloomReconstroi(TabelaHash *t, unsigned int chave)
     bloomLimpa(&t->filtros[chave]);
     for (atual = t->baldes[chave].head; atual != NULL; atual = atual->next)
     {
-        bloomAdiciona(&t->filtros[chave], hashFNV64(atual->pessoa.nome));
+        bloomAdiciona(&t->filtros[chave], hashNome64(atual->pessoa.nome));
     }
 }
+
+/* ---------- Tabela ---------- */
 
 Elemento *criaElemento(const char *nome)
 {
@@ -237,7 +232,6 @@ TabelaHash *criaTabela(void)
         bloomLimpa(&t->filtros[i]);
     }
     t->total = 0;
-    t->usarP2C = 1; 
     return t;
 }
 
@@ -259,22 +253,16 @@ void liberaTabela(TabelaHash *t)
     free(t);
 }
 
+/* P2C: insere no fim da lista menos cheia entre c1 e c2 (empate em c1). */
 unsigned int insere(TabelaHash *t, const char *nome)
 {
     unsigned int c1, c2, chave;
-    uint64_t h = hashFNV64(nome);
+    uint64_t h = hashNome64(nome);
     Lista *l;
     Elemento *novo;
 
     chavesDoHash(h, &c1, &c2);
-    if (t->usarP2C)
-    {
-        chave = (t->baldes[c2].size < t->baldes[c1].size) ? c2 : c1;
-    }
-    else
-    {
-        chave = c1; 
-    }
+    chave = (t->baldes[c2].size < t->baldes[c1].size) ? c2 : c1;
     l = &t->baldes[chave];
     novo = criaElemento(nome);
 
@@ -307,10 +295,16 @@ static Elemento *procuraNaLista(Lista *l, const char *nome,
 
     while (atual != NULL)
     {
-        (*cmp)++;
+        if (cmp != NULL)
+        {
+            (*cmp)++;
+        }
         if (strcmp(atual->pessoa.nome, nome) == 0)
         {
-            *pos = p;
+            if (pos != NULL)
+            {
+                *pos = p;
+            }
             return atual;
         }
         atual = atual->next;
@@ -319,154 +313,49 @@ static Elemento *procuraNaLista(Lista *l, const char *nome,
     return NULL;
 }
 
-static Elemento *procuraIntercalada(Lista *a, Lista *b, const char *nome,
-                                    unsigned long *cmpA, unsigned long *cmpB,
-                                    int *noB, int *pos)
-{
-    Elemento *x = a->head;
-    Elemento *y = b->head;
-    int pa = 1, pb = 1;
-
-    while (x != NULL && y != NULL)
-    {
-        (*cmpA)++;
-        if (strcmp(x->pessoa.nome, nome) == 0)
-        {
-            *noB = 0;
-            *pos = pa;
-            return x;
-        }
-        (*cmpB)++;
-        if (strcmp(y->pessoa.nome, nome) == 0)
-        {
-            *noB = 1;
-            *pos = pb;
-            return y;
-        }
-        x = x->next;
-        y = y->next;
-        pa++;
-        pb++;
-    }
-    while (x != NULL)
-    {
-        (*cmpA)++;
-        if (strcmp(x->pessoa.nome, nome) == 0)
-        {
-            *noB = 0;
-            *pos = pa;
-            return x;
-        }
-        x = x->next;
-        pa++;
-    }
-    while (y != NULL)
-    {
-        (*cmpB)++;
-        if (strcmp(y->pessoa.nome, nome) == 0)
-        {
-            *noB = 1;
-            *pos = pb;
-            return y;
-        }
-        y = y->next;
-        pb++;
-    }
-    return NULL;
-}
-
+/* Consulta nas duas chaves candidatas, usando o filtro de Bloom para pular
+   listas onde o elemento certamente nao esta. */
 int consulta(TabelaHash *t, const char *nome)
 {
-    uint64_t h = hashFNV64(nome);
-    unsigned int c1, c2;
-    unsigned long cmpA = 0, cmpB = 0;
-    Elemento *e = NULL;
-    int p1, p2, noB = 0, pos = 0, listas;
+    uint64_t h = hashNome64(nome);
+    unsigned int cand[2];
+    int i, pos = 0, achou = 0, listas = 0;
+    unsigned long cmp = 0;
 
-    chavesDoHash(h, &c1, &c2);
-    p1 = bloomPossui(&t->filtros[c1], h);
-    p2 = (c2 != c1) && bloomPossui(&t->filtros[c2], h);
-
-    if (c2 != c1)
-        printf("Chaves candidatas: %u (%d nome(s), filtro: %s) e %u (%d nome(s), filtro: %s)\n",
-               c1, t->baldes[c1].size, p1 ? "possivel" : "ausente",
-               c2, t->baldes[c2].size, p2 ? "possivel" : "ausente");
-    else
-        printf("Chave candidata: %u (%d nome(s), filtro: %s)\n",
-               c1, t->baldes[c1].size, p1 ? "possivel" : "ausente");
-
-    if (!p1 && !p2)
+    chavesDoHash(h, &cand[0], &cand[1]);
+    if (cand[1] == cand[0])
     {
-        printf("   descartado pelos filtros: nenhuma lista foi percorrida\n");
-        return 0;
+        cand[1] = cand[0];
     }
 
-    if (p1 && p2)
-        e = procuraIntercalada(&t->baldes[c1], &t->baldes[c2], nome,
-                               &cmpA, &cmpB, &noB, &pos);
-    else if (p1)
-        e = procuraNaLista(&t->baldes[c1], nome, &cmpA, &pos);
-    else
+    for (i = 0; i < 2; i++)
     {
-        e = procuraNaLista(&t->baldes[c2], nome, &cmpB, &pos);
-        noB = 1;
-    }
-
-    if (e != NULL)
-        printf("   encontrado na posicao %d da chave %u\n", pos, noB ? c2 : c1);
-
-    listas = (cmpA > 0) + (cmpB > 0);
-    printf("   comparacoes: %lu | listas percorridas: %d\n",
-           cmpA + cmpB, listas);
-    return e != NULL;
-}
-
-static void varreLista(Lista *l, unsigned int chave, const char *nome,
-                       int *ocorrencias)
-{
-    Elemento *atual = l->head;
-    int posicao = 1;
-
-    while (atual != NULL)
-    {
-        if (strcmp(atual->pessoa.nome, nome) == 0)
+        if (i == 1 && cand[1] == cand[0])
         {
-            (*ocorrencias)++;
-            if (*ocorrencias <= 20)
+            continue;
+        }
+
+        int possivel = bloomPossui(&t->filtros[cand[i]], h);
+        printf("Chave candidata %u: %d nome(s), filtro: %s\n", cand[i],
+               t->baldes[cand[i]].size, possivel ? "possivel" : "ausente");
+
+        if (possivel && !achou)
+        {
+            listas++;
+            if (procuraNaLista(&t->baldes[cand[i]], nome, &cmp, &pos) != NULL)
             {
-                printf("   encontrado na posicao %d da chave %u\n", posicao, chave);
+                printf("   encontrado na posicao %d da chave %u\n", pos, cand[i]);
+                achou = 1;
             }
         }
-        atual = atual->next;
-        posicao++;
     }
-}
 
-int contaOcorrencias(TabelaHash *t, const char *nome)
-{
-    uint64_t h = hashFNV64(nome);
-    unsigned int c1, c2;
-    int ocorrencias = 0;
-
-    chavesDoHash(h, &c1, &c2);
-    printf("Chaves candidatas para \"%s\": %u (%d nome(s)) e %u (%d nome(s))\n",
-           nome, c1, t->baldes[c1].size, c2, t->baldes[c2].size);
-
-    if (bloomPossui(&t->filtros[c1], h))
+    if (!achou && listas == 0)
     {
-        varreLista(&t->baldes[c1], c1, nome, &ocorrencias);
+        printf("   descartado pelos filtros: nenhuma lista foi percorrida\n");
     }
-    if (c2 != c1 && bloomPossui(&t->filtros[c2], h))
-    {
-        varreLista(&t->baldes[c2], c2, nome, &ocorrencias);
-    }
-
-    if (ocorrencias > 20)
-    {
-        printf("   ... (%d ocorrencias no total, exibidas as 20 primeiras)\n",
-               ocorrencias);
-    }
-    return ocorrencias;
+    printf("   comparacoes: %lu | listas percorridas: %d\n", cmp, listas);
+    return achou;
 }
 
 static void removeElemento(Lista *l, Elemento *e)
@@ -477,7 +366,7 @@ static void removeElemento(Lista *l, Elemento *e)
     }
     else
     {
-        l->head = e->next; 
+        l->head = e->next;
     }
 
     if (e->next != NULL)
@@ -486,56 +375,38 @@ static void removeElemento(Lista *l, Elemento *e)
     }
     else
     {
-        l->tail = e->prev; 
+        l->tail = e->prev;
     }
 
     free(e);
     l->size--;
 }
 
-static Elemento *achaNaLista(Lista *l, const char *nome)
-{
-    Elemento *atual = l->head;
-
-    while (atual != NULL)
-    {
-        if (strcmp(atual->pessoa.nome, nome) == 0)
-        {
-            return atual;
-        }
-        atual = atual->next;
-    }
-    return NULL;
-}
-
+/* Remove a primeira ocorrencia do nome e refaz o filtro da lista afetada */
 int remove_nome(TabelaHash *t, const char *nome)
 {
-    unsigned int c1, c2, tmp;
+    uint64_t h = hashNome64(nome);
+    unsigned int cand[2];
+    int i;
     Elemento *e;
 
-    duasChaves(nome, &c1, &c2);
-    if (t->baldes[c2].size > t->baldes[c1].size)
-    {
-        tmp = c1;
-        c1 = c2;
-        c2 = tmp;
-    }
+    chavesDoHash(h, &cand[0], &cand[1]);
 
-    e = achaNaLista(&t->baldes[c1], nome);
-    if (e != NULL)
+    for (i = 0; i < 2; i++)
     {
-        removeElemento(&t->baldes[c1], e);
-        bloomReconstroi(t, c1);
-        t->total--;
-        return 1;
-    }
-    if (c2 != c1)
-    {
-        e = achaNaLista(&t->baldes[c2], nome);
+        if (i == 1 && cand[1] == cand[0])
+        {
+            continue;
+        }
+        if (!bloomPossui(&t->filtros[cand[i]], h))
+        {
+            continue;
+        }
+        e = procuraNaLista(&t->baldes[cand[i]], nome, NULL, NULL);
         if (e != NULL)
         {
-            removeElemento(&t->baldes[c2], e);
-            bloomReconstroi(t, c2);
+            removeElemento(&t->baldes[cand[i]], e);
+            bloomReconstroi(t, cand[i]);
             t->total--;
             return 1;
         }
@@ -547,6 +418,8 @@ int quantidadePorChave(TabelaHash *t, int chave)
 {
     return t->baldes[chave].size;
 }
+
+/* ---------- Quicksort na lista dupla ---------- */
 
 static void trocaPessoas(Elemento *a, Elemento *b)
 {
@@ -645,6 +518,8 @@ void imprimeChave(TabelaHash *t, int chave, int limite)
     }
 }
 
+/* ---------- Histograma e estatisticas ---------- */
+
 static double raiz(double x)
 {
     double r, ant;
@@ -669,8 +544,9 @@ static double raiz(double x)
 
 void imprimeHistograma(TabelaHash *t)
 {
-    int i, j, max, min, chaveMax, chaveMin, porBarra, barra, ocupadas;
-    double N, M, media, soma, var, desvio, desvioEsperado, qui2, d;
+    static const char barras[] = "##################################################";
+    int i, max, min, chaveMax, chaveMin, porBarra, barra, ocupadas;
+    double N, M, media, soma, desvio, desvioEsperado, qui2, d;
 
     if (t->total == 0)
     {
@@ -680,26 +556,34 @@ void imprimeHistograma(TabelaHash *t)
 
     N = (double)t->total;
     M = (double)TAM_TABELA;
+    media = N / M;
 
     max = min = t->baldes[0].size;
     chaveMax = chaveMin = 0;
     ocupadas = 0;
+    soma = 0.0;
+    qui2 = 0.0;
+
     for (i = 0; i < TAM_TABELA; i++)
     {
-        if (t->baldes[i].size > max)
+        int sz = t->baldes[i].size;
+        if (sz > max)
         {
-            max = t->baldes[i].size;
+            max = sz;
             chaveMax = i;
         }
-        if (t->baldes[i].size < min)
+        if (sz < min)
         {
-            min = t->baldes[i].size;
+            min = sz;
             chaveMin = i;
         }
-        if (t->baldes[i].size > 0)
+        if (sz > 0)
         {
             ocupadas++;
         }
+        d = (double)sz - media;
+        soma += d * d;
+        qui2 += (d * d) / media;
     }
 
     porBarra = (max + LARGURA_BARRA - 1) / LARGURA_BARRA;
@@ -713,26 +597,10 @@ void imprimeHistograma(TabelaHash *t)
     for (i = 0; i < TAM_TABELA; i++)
     {
         barra = (t->baldes[i].size + porBarra - 1) / porBarra;
-        printf("Chave %2d | ", i);
-        for (j = 0; j < barra; j++)
-        {
-            putchar('#');
-        }
-        printf(" %d\n", t->baldes[i].size);
+        printf("Chave %2d | %.*s %d\n", i, barra, barras, t->baldes[i].size);
     }
 
-    media = N / M;
-    soma = 0.0;
-    qui2 = 0.0;
-    for (i = 0; i < TAM_TABELA; i++)
-    {
-        d = (double)t->baldes[i].size - media;
-        soma += d * d;
-        qui2 += (d * d) / media;
-    }
-    var = soma / M;
-    desvio = raiz(var);
-    
+    desvio = raiz(soma / M);
     desvioEsperado = raiz(N * (1.0 / M) * (1.0 - 1.0 / M));
 
     printf("\n===== ESTATISTICAS =====\n");
@@ -743,42 +611,40 @@ void imprimeHistograma(TabelaHash *t)
     printf("Colisoes (N - ocupadas)   : %d\n", t->total - ocupadas);
     printf("Menor lista               : %d (chave %d)\n", min, chaveMin);
     printf("Maior lista               : %d (chave %d)\n", max, chaveMax);
-    printf("Amplitude                 : %d \n", max - min);
+    printf("Amplitude                 : %d\n", max - min);
     printf("Amplitude esperada (unif) : ~%.0f\n", 4.5 * desvioEsperado);
     printf("Media por chave           : %.2f\n", media);
     printf("Desvio padrao observado   : %.2f\n", desvio);
     printf("Desvio esperado (uniforme): %.2f\n", desvioEsperado);
-    if (desvioEsperado > 0.0)
-    {
-        printf("Razao observado/esperado  : %.2f (menor = mais uniforme)\n",
-               desvio / desvioEsperado);
-    }
-    printf("Qui-quadrado              : %.2f (critico 5%%, 52 g.l.: %.2f)\n",
-           qui2, QUI2_CRITICO);
-    if (qui2 <= QUI2_CRITICO)
-    {
-        printf("   -> nao rejeita a hipotese de distribuicao uniforme\n");
-    }
-    else
+    printf("Razao observado/esperado  : %.2f (1 = aleatorio ideal; <1 = mais regular que o acaso)\n",
+           desvio / desvioEsperado);
+    printf("Qui-quadrado              : %.2f (5%%, 52 g.l.: acima de %.2f rejeita; abaixo de %.2f e mais regular que o acaso)\n",
+           qui2, QUI2_CRITICO, QUI2_INFERIOR);
+    if (qui2 > QUI2_CRITICO)
     {
         printf("   -> rejeita a hipotese de distribuicao uniforme\n");
     }
-    printf("Obs.: com N muito grande o teste qui-quadrado rejeita ate\n");
-    printf("      desvios pequenos; avalie junto da razao e do histograma.\n");
+    else if (qui2 < QUI2_INFERIOR)
+    {
+        printf("   -> mais regular que o acaso (distribuicao equilibrada, nao aleatoria)\n");
+    }
+    else
+    {
+        printf("   -> compativel com distribuicao uniforme (nao rejeita a hipotese)\n");
+    }
 }
 
-int carregaArquivo(TabelaHash *t, const char *caminho,
-                   int *inseridos, int *truncados)
+/* ---------- Entrada e menu ---------- */
+
+int carregaArquivo(TabelaHash *t, const char *caminho, int *inseridos)
 {
     FILE *f = fopen(caminho, "r");
     char linha[TAM_NOME];
     char *inicio;
     size_t len;
-    int c, primeira = 1;
+    int primeira = 1;
 
     *inseridos = 0;
-    *truncados = 0;
-
     if (f == NULL)
     {
         return 0;
@@ -787,32 +653,17 @@ int carregaArquivo(TabelaHash *t, const char *caminho,
     while (fgets(linha, sizeof(linha), f) != NULL)
     {
         len = strlen(linha);
-
-        if (len > 0 && linha[len - 1] == '\n')
+        while (len > 0 && (linha[len - 1] == '\n' || linha[len - 1] == '\r' ||
+                           linha[len - 1] == ' ' || linha[len - 1] == '\t'))
         {
-            linha[len - 1] = '\0';
-            len--;
-        }
-        else if (!feof(f))
-        {
-            
-            while ((c = fgetc(f)) != '\n' && c != EOF)
-            {
-                
-            }
-            (*truncados)++;
-        }
-
-        while (len > 0 && (linha[len - 1] == '\r' || linha[len - 1] == ' ' || linha[len - 1] == '\t'))
-        {
-            linha[len - 1] = '\0';
-            len--;
+            linha[--len] = '\0';
         }
 
         inicio = linha;
-        if (primeira && (unsigned char)inicio[0] == 0xEF && (unsigned char)inicio[1] == 0xBB && (unsigned char)inicio[2] == 0xBF)
+        if (primeira && (unsigned char)inicio[0] == 0xEF &&
+            (unsigned char)inicio[1] == 0xBB && (unsigned char)inicio[2] == 0xBF)
         {
-            inicio += 3; 
+            inicio += 3;
         }
         primeira = 0;
 
@@ -823,7 +674,7 @@ int carregaArquivo(TabelaHash *t, const char *caminho,
 
         if (*inicio == '\0')
         {
-            continue; 
+            continue;
         }
 
         insere(t, inicio);
@@ -834,16 +685,15 @@ int carregaArquivo(TabelaHash *t, const char *caminho,
     return 1;
 }
 
-void limpaBuffer(void)
+static void limpaBuffer(void)
 {
     int c;
     while ((c = getchar()) != '\n' && c != EOF)
     {
-        
     }
 }
 
-int lerInt(int *valor)
+static int lerInt(int *valor)
 {
     if (scanf("%d", valor) != 1)
     {
@@ -855,10 +705,9 @@ int lerInt(int *valor)
     return 1;
 }
 
-void leTexto(char *destino, int tamanho)
+static void leTexto(char *destino, int tamanho)
 {
     size_t len;
-
     if (fgets(destino, tamanho, stdin) != NULL)
     {
         len = strlen(destino);
@@ -892,111 +741,25 @@ static int lerChave(int *chave)
     return 1;
 }
 
-void exibeMenu(void)
-{
-    printf("\n===== MENU - Tabela Hash (M=%d) =====\n", TAM_TABELA);
-    printf("1  - Inserir nome\n");
-    printf("2  - Consultar nome (filtros + busca intercalada)\n");
-    printf("3  - Remover nome (primeira ocorrencia)\n");
-    printf("4  - Quantidade de nomes por chave\n");
-    printf("5  - Listar nomes de uma chave\n");
-    printf("6  - Ordenar nomes de uma chave (quicksort)\n");
-    printf("7  - Ordenar todas as chaves (quicksort)\n");
-    printf("8  - Histograma e analise de uniformidade\n");
-    printf("9  - Carregar base de nomes de um arquivo\n");
-    printf("10 - Executar tudo automaticamente (fazTudo)\n");
-    printf("11 - Preencher tabela automaticamente\n");
-    printf("12 - Contar ocorrencias de um nome\n");
-    printf("13 - Alternar hashing com/sem P2C (somente tabela vazia)\n");
-    printf("0  - Sair\n");
-    printf("Escolha uma opcao: ");
-}
-
-void preencheTabela(TabelaHash *t)
-{
-    int i;
-    for (i = 0; i < QTD_EXEMPLO; i++)
-    {
-        insere(t, NOMES_EXEMPLO[i]);
-    }
-}
-
-static void ordenaTodas(TabelaHash *t)
-{
-    int i;
-    for (i = 0; i < TAM_TABELA; i++)
-        ordenaChave(t, i);
-    printf("Todas as chaves foram ordenadas.\\n");
-}
-
-void fazTudo(void)
-{
-    TabelaHash *semP2C = criaTabela();
-    TabelaHash *comP2C = criaTabela();
-    int inseridosSem, inseridosCom;
-    int truncadosSem, truncadosCom;
-    clock_t ini;
-
-    semP2C->usarP2C = 0;
-    comP2C->usarP2C = 1;
-
-    printf("\n===== COMPARACAO: HASH SEM P2C x HASH COM P2C =====\n");
-    printf("Arquivo de entrada: nomes.txt (um nome por linha)\n");
-
-    ini = clock();
-    if (!carregaArquivo(semP2C, "nomes.txt", &inseridosSem, &truncadosSem))
-    {
-        printf("ERRO: nao foi possivel abrir nomes.txt.\n");
-        printf("Coloque nomes.txt na mesma pasta em que o programa e executado.\n");
-        liberaTabela(semP2C);
-        liberaTabela(comP2C);
-        return;
-    }
-
-    if (!carregaArquivo(comP2C, "nomes.txt", &inseridosCom, &truncadosCom))
-    {
-        
-        printf("ERRO: nao foi possivel carregar nomes.txt para a tabela com P2C.\n");
-        liberaTabela(semP2C);
-        liberaTabela(comP2C);
-        return;
-    }
-
-    printf("\nNomes carregados sem P2C: %d\n", inseridosSem);
-    printf("Nomes carregados com P2C: %d\n", inseridosCom);
-    printf("Tempo total de carregamento das duas tabelas: %.3f s\n",
-           (double)(clock() - ini) / CLOCKS_PER_SEC);
-
-    if (truncadosSem > 0 || truncadosCom > 0)
-    {
-        printf("Aviso: houve linhas maiores que %d caracteres; elas foram truncadas.\n",
-               TAM_NOME - 1);
-        printf("Linhas truncadas (sem P2C / com P2C): %d / %d\n",
-               truncadosSem, truncadosCom);
-    }
-
-    printf("\n\n========== HISTOGRAMA 1: HASH SEM P2C ==========\n");
-    imprimeHistograma(semP2C);
-
-    printf("\n\n========== HISTOGRAMA 2: HASH COM P2C ==========\n");
-    imprimeHistograma(comP2C);
-
-    liberaTabela(semP2C);
-    liberaTabela(comP2C);
-}
-
 int main(void)
 {
     TabelaHash *t = criaTabela();
-    int opcao, chave, limite, inseridos, truncados;
-    char nome[TAM_NOME];
-    char caminho[256];
-    clock_t ini;
-    int continuar = 1;
+    int opcao, chave, limite, inseridos, continuar = 1;
+    char nome[TAM_NOME], caminho[256];
 
     while (continuar)
     {
-        exibeMenu();
+        printf("\n===== MENU - Tabela Hash (M=%d, P2C + Bloom) =====\n", TAM_TABELA);
+        printf("1 - Inserir nome\n");
+        printf("2 - Consultar nome\n");
+        printf("3 - Remover nome\n");
+        printf("4 - Quantidade de nomes por chave\n");
+        printf("5 - Listar nomes de uma chave\n");
+        printf("6 - Ordenar nomes de uma chave (quicksort)\n");
+        printf("7 - Histograma e estatisticas\n");
+        printf("8 - Carregar base de nomes de um arquivo\n");
+        printf("0 - Sair\n");
+        printf("Escolha uma opcao: ");
 
         if (!lerInt(&opcao))
         {
@@ -1010,12 +773,12 @@ int main(void)
             leTexto(nome, TAM_NOME);
             if (nome[0] == '\0')
             {
-                printf("Nome vazio. Nada inserido.\n");
+                printf("Nome vazio.\n");
             }
             else
             {
                 chave = (int)insere(t, nome);
-                printf("\"%s\" inserido na chave %d (agora com %d nome(s)).\n",
+                printf("\"%s\" inserido na chave %d (total na chave: %d).\n",
                        nome, chave, quantidadePorChave(t, chave));
             }
             break;
@@ -1023,7 +786,7 @@ int main(void)
         case 2:
             printf("Digite o nome a consultar: ");
             leTexto(nome, TAM_NOME);
-            if (consulta(t, nome) == 0)
+            if (!consulta(t, nome))
             {
                 printf("Nome nao encontrado.\n");
             }
@@ -1038,14 +801,14 @@ int main(void)
             }
             else
             {
-                printf("Nome nao encontrado. Nada removido.\n");
+                printf("Nome nao encontrado.\n");
             }
             break;
 
         case 4:
             if (lerChave(&chave))
             {
-                printf("A chave %d tem %d nome(s). Total na tabela: %d.\n",
+                printf("Chave %d: %d nome(s) (total geral: %d).\n",
                        chave, quantidadePorChave(t, chave), t->total);
             }
             break;
@@ -1070,76 +833,32 @@ int main(void)
             break;
 
         case 7:
-            ordenaTodas(t);
-            break;
-
-        case 8:
             imprimeHistograma(t);
             break;
 
-
-        case 9:
-            printf("Caminho do arquivo (um nome por linha): ");
+        case 8:
+            printf("Caminho do arquivo: ");
             leTexto(caminho, sizeof(caminho));
-            ini = clock();
-            if (carregaArquivo(t, caminho, &inseridos, &truncados))
+            if (carregaArquivo(t, caminho, &inseridos))
             {
-                printf("%d nome(s) inseridos em %.3f s. Total na tabela: %d.\n",
-                       inseridos, (double)(clock() - ini) / CLOCKS_PER_SEC,
-                       t->total);
-                if (truncados > 0)
-                {
-                    printf("Aviso: %d linha(s) maiores que %d caracteres foram truncadas.\n",
-                           truncados, TAM_NOME - 1);
-                }
+                printf("%d nome(s) carregados. Total: %d.\n", inseridos, t->total);
             }
             else
             {
-                printf("Nao foi possivel abrir o arquivo \"%s\".\n", caminho);
-            }
-            break;
-
-        case 10:
-            fazTudo();
-            break;
-
-        case 11:
-            preencheTabela(t);
-            printf("%d nomes de exemplo inseridos. Total: %d.\n",
-                   QTD_EXEMPLO, t->total);
-            break;
-
-        case 12:
-            printf("Digite o nome a contar: ");
-            leTexto(nome, TAM_NOME);
-            printf("Total: %d ocorrencia(s).\n", contaOcorrencias(t, nome));
-            break;
-
-        case 13:
-            if (t->total != 0)
-            {
-                printf("Esvazie/reinicie a tabela antes de trocar o modo de hashing.\n");
-            }
-            else
-            {
-                t->usarP2C = !t->usarP2C;
-                printf("Modo selecionado: %s.\n",
-                       t->usarP2C ? "COM P2C" : "SEM P2C (somente primeira chave)");
+                printf("Nao foi possivel abrir \"%s\".\n", caminho);
             }
             break;
 
         case 0:
-            printf("Encerrando...\n");
             continuar = 0;
             break;
 
         default:
-            printf("Opcao invalida. Tente novamente.\n");
+            printf("Opcao invalida.\n");
             break;
         }
     }
 
     liberaTabela(t);
-
     return 0;
 }
